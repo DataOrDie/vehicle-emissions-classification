@@ -1,0 +1,164 @@
+What the data contains:
+
+Data fields
+
+    id # Text # Identifier of the data instance
+    LoanNr_ChkDgt # Text # Identifier of the loan petition
+    Name # Text # Borrower name
+    City # Text # Borrower city
+    State # Text # Borrower state
+    Bank # Text # Bank name
+    BankState # Text # Bank state
+    ApprovalDate # Date/Time # Date SBA commitment issued
+    ApprovalFY # Text # Fiscal year of commitment
+    NoEmp # Number # Number of business employees
+    NewExist # Text # 1 = Existing business, 2 = New business
+    CreateJob # Number # Number of jobs created
+    RetainedJob # Number # Number of jobs retained
+    FranchiseCode # Text # Franchise code, (00000 or 00001) = No franchise
+    UrbanRural # Text # 1 = Urban, 2 = rural, 0 = undefined
+    RevLineCr # Text # Revolving line of credit: Y = Yes, N = No
+    LowDoc # Text # LowDoc Loan Program: Y = Yes, N = No
+    ChgOffDate # Date/Time # The date when a loan is declared to be in default
+    DisbursementDate # Date/Time # Disbursement date
+    DisbursementGross # Currency # Amount disbursed
+    BalanceGross # Currency # Gross amount outstanding
+    Accept # Text # Loan approval status. 0 = not approved, 1 = approved
+
+---
+
+To help you think like a bank representative, let’s break down the most critical columns from a risk assessment perspective, based on
+the about-data.md and the 100-line sample of train.csv.
+
+1. Business Maturity (NewExist)
+
+- Why it matters: In banking, the "age" of a business is one of the strongest predictors of survival. Startups (often coded as 2.0)  
+  have significantly higher failure rates than established businesses (1.0).
+- Insight: If Company X is a new business, you'd look for higher collateral or a stronger business plan.
+
+2. Capacity and Scale (NoEmp & DisbursementGross)
+
+- Why it matters: This is about "Debt Capacity." If a company with 1 employee (NoEmp) asks for $500,000 (DisbursementGross), the risk
+  is astronomical compared to a 50-employee firm asking for the same amount.
+- Insight: You'll want to analyze the ratio of loan size to employee count as a proxy for the business's ability to generate the
+  revenue needed for repayment.
+
+3. Business Model Stability (FranchiseCode)
+
+- Why it matters: Franchises have a "proven" success model. A FranchiseCode of 0 or 1 usually means it's an independent small
+  business, while a specific code (like 10481 for Big Apple Bagels in your sample) indicates a franchise.
+- Insight: Independent businesses are generally riskier than franchises, which have corporate support and standardized operations.
+
+4. Economic Impact (CreateJob & RetainedJob)
+
+- Why it matters: Since these are likely SBA-backed loans (implied by the columns and about-data.md), the bank isn't just looking at
+  profit—they're looking at the mission.
+- Insight: A loan that creates 10 jobs is more "attractive" to approve under certain government-guaranteed programs than one that
+  creates zero, even if the risk profile is similar.
+
+5. Loan Type and Complexity (RevLineCr & LowDoc)
+
+- Why it matters:
+  - RevLineCr (Revolving Line of Credit): These are like credit cards for businesses. High usage can signal cash-flow struggles.
+  - LowDoc (Low Documentation): If a loan is "LowDoc" (Y), it was processed with less paperwork. This often means the loan is  
+    smaller but might have higher interest or specific eligibility rules.
+
+6. Macro-Conditions (ApprovalFY & UrbanRural)
+
+- Why it matters: A loan approved in 2006 (ApprovalFY) just before the 2008 crash has a very different context than one approved in 1996. Similarly, economic conditions in Urban vs. Rural areas (coded in UrbanRural) affect a business's customer base.
+
+Strategic Question for your Analysis:
+When you start coding, I suggest looking at the Default Rate (where Accept = 0) across these categories:
+
+1.  Is the default rate significantly higher for New Businesses (NewExist=2)?
+2.  Does a high DisbursementGross correlate with more defaults for small NoEmp counts?
+3.  Are LowDoc loans actually safer or riskier in this specific dataset?
+
+---
+
+Accept: This is the Target label. binary outcome (0/1).
+In this preview, class 1 appears much more frequent than class 0, so you should check class imbalance on the full file.
+
+Identifier / leakage-prone fields:
+
+id: unique row id (do not use as predictive signal).
+
+LoanNr_ChkDgt: loan identifier, usually not useful except maybe for dedup checks.
+
+Borrower profile fields:
+Name, City, State
+NoEmp (number of employees)
+NewExist (existing business vs new business)
+FranchiseCode
+UrbanRural
+Loan and process fields:
+Bank, BankState
+ApprovalDate, ApprovalFY
+DisbursementDate
+DisbursementGross (currency string)
+BalanceGross (currency string; often 0 in this sample)
+
+Job impact fields:
+CreateJob
+RetainedJob
+Program/credit policy flags:
+RevLineCr
+LowDoc
+These are categorical flags with values like Y/N and some non-standard values (for example 0, T, S), so category cleaning is needed.
+
+What this means for your challenge (grant or deny loan):
+
+You can frame risk as P(Accept = 1) or P(deny), depending on how the competition defines positive class.
+
+The strongest likely risk signals will come from:
+
+- business size and maturity (NoEmp, NewExist),
+- requested amount (DisbursementGross),
+- lender/program characteristics (Bank, RevLineCr, LowDoc),
+- geography and time (City/State, ApprovalFY).
+
+Before modeling, do essential preprocessing:
+parse currency columns into numeric,
+parse dates into time features (year, month, loan age),
+normalize categorical text (case/typos),
+handle unusual categorical codes and missing values,
+drop pure IDs.
+
+---
+
+## Data Dictionary (Simplified)
+
+| Field             | Type      | Simple Description                                      | Common Values / Notes                                          |
+| ----------------- | --------- | ------------------------------------------------------- | -------------------------------------------------------------- |
+| id                | Text      | Unique identifier for each row in the dataset.          | Usually used only to identify records, not as a model feature. |
+| LoanNr_ChkDgt     | Text      | Unique loan application identifier.                     | Useful for tracking or deduplication checks.                   |
+| Name              | Text      | Name of the business owner or borrower.                 | High-cardinality text; often not ideal for direct modeling.    |
+| City              | Text      | Borrower's city.                                        | Location feature.                                              |
+| State             | Text      | Borrower's state.                                       | Two-letter state code in many cases.                           |
+| Bank              | Text      | Name of the bank that handled the loan.                 | Can capture lender-specific behavior.                          |
+| BankState         | Text      | State where the bank is located.                        | May differ from borrower state.                                |
+| ApprovalDate      | Date/Time | Date when the SBA commitment was approved.              | Can be converted into year/month/quarter features.             |
+| ApprovalFY        | Text      | Fiscal year when the loan was approved.                 | Time and macroeconomic context feature.                        |
+| NoEmp             | Number    | Number of employees in the business.                    | Proxy for business size.                                       |
+| NewExist          | Text      | Whether the business is new or existing.                | `1 = Existing business`, `2 = New business`.                   |
+| CreateJob         | Number    | Number of jobs expected to be created by the loan.      | Program impact indicator.                                      |
+| RetainedJob       | Number    | Number of jobs expected to be retained.                 | Program impact indicator.                                      |
+| FranchiseCode     | Text      | Code indicating franchise relationship.                 | `00000` or `00001` often means no franchise.                   |
+| UrbanRural        | Text      | Area type where the business operates.                  | `1 = Urban`, `2 = Rural`, `0 = Undefined`.                     |
+| RevLineCr         | Text      | Indicates if this loan is a revolving line of credit.   | `Y = Yes`, `N = No` (may include non-standard values).         |
+| LowDoc            | Text      | Indicates if this is a low-documentation loan.          | `Y = Yes`, `N = No` (may include non-standard values).         |
+| ChgOffDate        | Date/Time | Date the loan was charged off (default/write-off date). | Missing values can mean no charge-off occurred.                |
+| DisbursementDate  | Date/Time | Date when funds were disbursed to the borrower.         | Useful for time-based features.                                |
+| DisbursementGross | Currency  | Total loan amount disbursed.                            | Convert currency strings to numeric values before modeling.    |
+| BalanceGross      | Currency  | Remaining gross balance outstanding.                    | Often zero in some subsets; still useful to inspect.           |
+| Accept            | Text      | Target label: whether the loan was approved.            | `0 = Not approved`, `1 = Approved`.                            |
+
+# Questions
+
+1. NewExisting Column.
+   Recode NewExist == 0.0 to missing (NaN), since docs define only 1 and 2.
+   Create an explicit "Unknown" category for missing values.
+   One-hot encode NewExist (Existing, New, Unknown).
+   Validate with cross-validation against a simpler baseline (drop those 13 rows) and keep whichever performs better.
+   If you want the simplest pipeline: drop those 13 rows.
+   If you want a production-robust pipeline: keep rows and add Unknown category (recommended).
