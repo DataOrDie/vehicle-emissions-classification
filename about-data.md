@@ -162,3 +162,44 @@ drop pure IDs.
    Validate with cross-validation against a simpler baseline (drop those 13 rows) and keep whichever performs better.
    If you want the simplest pipeline: drop those 13 rows.
    If you want a production-robust pipeline: keep rows and add Unknown category (recommended).
+
+2. For training, NoEmp = 0 can be handled in a few solid ways. Best choice depends on whether 0 means bad data or a real business state.
+
+- Treat 0 as invalid and drop those rows
+  Use when 0 is impossible/noise.
+  Pro: cleanest signal.
+  Con: you lose data (in your case only about 1.02%, so loss is small).
+- Treat 0 as missing and impute
+  Replace 0 with NaN, then impute (median, KNN, or model-based).
+  Add a flag feature like NoEmp_was_zero.
+  Pro: keeps rows and preserves “was suspicious” information.
+  Con: imputation can blur true risk patterns.
+- Keep 0 as a separate meaningful state
+  If 0 could represent pre-operational firms/unknown staffing, keep it.
+  Add engineered bands with explicit category NoEmp=0.
+  Pro: model can learn if this group has different risk.
+  Con: only works if 0 is truly meaningful.
+- Use robust transforms/features
+  For skewed NoEmp, use log1p(NoEmp) and/or bands (0, 1, 2-5, 6-10, 11-50, >50).
+  If using ratios like loan per employee, protect division with:
+  loan_per_employee = loan_amount / max(NoEmp, 1) or
+  set ratio missing when NoEmp=0 and add NoEmp_is_zero flag.
+  Pro: avoids exploding ratios and improves stability.
+
+Note: Model-family-specific handling
+
+- Tree models (XGBoost/LightGBM/CatBoost): often do well with indicator + raw/banded feature.
+- Linear models: usually better with imputation + indicator + transformation.
+  Recommended practical workflow:
+
+* Build 3 pipelines and compare by cross-validation:
+  A: drop NoEmp=0
+  B: 0 -> NaN + impute + NoEmp_is_zero
+  C: keep 0 + add NoEmp_is_zero + NoEmp bands
+  Compare AUC/F1/PR-AUC and calibration.
+  Pick the simplest strategy that performs best and is easiest to explain.
+  Given your data (small share of zeros), a strong baseline is:
+
+- NoEmp_is_zero flag
+- NoEmp_clean = NoEmp.replace(0, np.nan) with median imputation
+- NoEmp_band feature for nonlinearity
