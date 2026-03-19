@@ -298,3 +298,48 @@ Default starting point:
 - Keep 0 inside UNKNOWN at first
 - Add nonstandard and missing flags
 - Validate with ablation; if mapping 0->N consistently improves and is stable, then adopt it
+
+### Bank
+
+some rows have empty banks (how many approved , non approved?)
+
+## BankState
+
+some rows are empty. verify if we can easily remove them, how may approved/ not approved
+
+### ApprovalDate
+
+what kind of data can we infer from the dates? are they important or they add bias to our model/training?
+are the "test" data and kaggle data evaluating this datapoints?
+
+### ApprovalFY
+
+lets match and plot aprovaldate and ApprovalFY by year, and reforate approvaldate
+
+### CreateJob and RetainedJob
+
+review is 0 jobs has approved loans
+
+### FranchiseCode
+
+review what insights we can obtain from this field
+
+### UrbanRural
+
+get insights about this field
+
+### ChgOffDate - no existe
+
+### DisbursementDate
+
+date = approved ?
+does it represent anything at training time?
+
+### DisbursementGross
+
+Excellent data quality with 20,767 valid values (99.99%)
+1 invalid value: a $0.00 disbursement (row 11414, IL) - what to do?? delete? is this "approved"?
+
+### BalanceGross
+
+are there any correlations between having a previous balance and new loan approvals? Can a model "see" this connections?
