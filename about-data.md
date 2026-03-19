@@ -155,15 +155,18 @@ drop pure IDs.
 
 # Questions
 
-1. NewExisting Column.
-   Recode NewExist == 0.0 to missing (NaN), since docs define only 1 and 2.
-   Create an explicit "Unknown" category for missing values.
-   One-hot encode NewExist (Existing, New, Unknown).
-   Validate with cross-validation against a simpler baseline (drop those 13 rows) and keep whichever performs better.
-   If you want the simplest pipeline: drop those 13 rows.
-   If you want a production-robust pipeline: keep rows and add Unknown category (recommended).
+### NewExisting Column.
 
-2. For training, NoEmp = 0 can be handled in a few solid ways. Best choice depends on whether 0 means bad data or a real business state.
+Recode NewExist == 0.0 to missing (NaN), since docs define only 1 and 2.
+Create an explicit "Unknown" category for missing values.
+One-hot encode NewExist (Existing, New, Unknown).
+Validate with cross-validation against a simpler baseline (drop those 13 rows) and keep whichever performs better.
+If you want the simplest pipeline: drop those 13 rows.
+If you want a production-robust pipeline: keep rows and add Unknown category (recommended).
+
+### NoEmp column.
+
+For training, NoEmp = 0 can be handled in a few solid ways. Best choice depends on whether 0 means bad data or a real business state.
 
 - Treat 0 as invalid and drop those rows
   Use when 0 is impossible/noise.
@@ -203,3 +206,80 @@ Note: Model-family-specific handling
 - NoEmp_is_zero flag
 - NoEmp_clean = NoEmp.replace(0, np.nan) with median imputation
 - NoEmp_band feature for nonlinearity
+
+### LowDoc column
+
+Since LowDoc is essentially a binary program flag (Y/N), those rare values should be treated as data quality artifacts, not real stable categories.
+
+Recommended strategy for modeling:
+
+Define a canonical mapping policy
+Keep Y and N as valid.
+Convert 0, S, C, A, R and blanks to Unknown.
+Keep true missing as Missing (or merge with Unknown if you prefer one bucket).
+Use a robust encoded feature set
+Create LowDoc_clean with categories: Y, N, Unknown, Missing.
+Add LowDoc_is_nonstandard as a binary flag (1 if original value in 0/S/C/A/R).
+Add LowDoc_is_missing as a binary flag.
+Avoid dropping rows
+These rows are only 0.42% total, but removing them can still bias data and reduce robustness.
+Usually better to keep them and let model learn if Unknown/Missing carries risk signal.
+Choose encoding by model type
+Tree models (XGBoost/LightGBM/CatBoost): keep categorical buckets directly (or one-hot).
+Linear/logistic models: one-hot encode LowDoc_clean and include the indicator flags.
+Prevent leakage and instability
+Fit all preprocessing inside CV folds only (pipeline).
+If you use target encoding for LowDoc, do out-of-fold target encoding only.
+Because rare buckets are tiny, avoid treating each as separate category unless you have strong domain reason.
+Run an ablation check
+Compare:
+Y/N only (non-standard -> missing)
+Y/N/Unknown/Missing
+Y/N + indicator flags
+Select the simplest version that gives stable CV performance and calibration.
+Practical default I’d use:
+
+LowDoc_clean: Y, N, UnknownOrMissing (single combined fallback bucket)
+Plus one flag: LowDoc_was_nonstandard_or_missing
+Then one-hot encode for linear models, or pass as category to tree models.
+
+### RevLineCr column
+
+For RevLineCr, the key difference vs LowDoc is that non-standard values are not rare, mainly because 0 is 24.3% of the dataset. That means you should not just drop them.
+
+Practical strategies for modeling:
+
+Treat this as a data-definition problem first
+Check data dictionary or source docs to confirm what 0 and T mean.
+If documentation confirms 0 is equivalent to N (or unknown), map accordingly.
+If no reliable documentation, do not force-map 0 to Y or N blindly.
+Use a safe fallback encoding
+Build RevLineCr_clean with categories:
+Y
+N
+UNKNOWN (for 0, T, Q)
+MISSING
+Because 0 is large, keeping it visible (as UNKNOWN or as its own bucket) is safer than deleting.
+Add quality indicator features
+RevLineCr_is_nonstandard: 1 for 0/T/Q, else 0.
+RevLineCr_is_missing: 1 for missing, else 0.
+These flags often help models capture “data quality signal.”
+Pick encoding by model family
+Tree models: pass as categorical buckets (or one-hot).
+Linear/logistic: one-hot RevLineCr_clean + include indicator flags.
+Avoid ordinal encoding (Y=1, N=0, UNKNOWN=2) unless explicitly justified.
+Run policy sensitivity tests
+Compare CV performance for:
+Policy A: 0/T/Q -> UNKNOWN
+Policy B: 0 -> N, T/Q -> UNKNOWN
+Policy C: keep 0 as separate category, T/Q grouped
+Choose the most stable option (mean + variance across folds), not just best single score.
+Keep preprocessing inside CV pipeline
+Fit encoders/imputers within each fold only.
+If using target encoding, use out-of-fold encoding only to avoid leakage.
+Recommended default starting point:
+
+RevLineCr_clean: Y/N/UNKNOWN/MISSING
+Keep 0 inside UNKNOWN at first
+Add two flags: nonstandard and missing
+Validate with ablation; if mapping 0->N consistently improves and is stable, then adopt it
