@@ -1,21 +1,32 @@
-id,
-LoanNr_ChkDgt,
-Name,
-City,
-State,
-Bank,
-BankState,
-ApprovalDate,
-ApprovalFY,
-NoEmp,
-NewExist,
-CreateJob,
-RetainedJob,
-FranchiseCode,
-UrbanRural,
-RevLineCr,
-LowDoc,
-DisbursementDate,
-DisbursementGross,
-BalanceGross,
+rosali
+id, del
+LoanNr_ChkDgt, del
+Name, del
+City, del
+State, del
+Bank, analize which banks are more lenient
+BankState, -> match-to-state? Y|N
+NoEmp, applicar estandarizacion y normalizacion ( separados, hacer pruebas con c/u)
+
+Ivan
+ApprovalDate, del
+ApprovalFY, analize- does it match approval date year
+
+merilyn
+NewExist, One-hot encode NewExist (Existing, New, Unknown)
+CreateJob,  normalize (0 to 1)
+RetainedJob, is = to NoEmp? if yes then delete. is 1 to 1 with CreateJobs? 
+
+marla
+FranchiseCode, create binary yes\no One-Hot Encoding
+UrbanRural, all good :)
+
+silvia
+RevLineCr, Analize extra**. RevLineCr_is_nonstandard: 1 for 0/T/Q, else 0.  RevLineCr_is_missing: 1 for missing, else 0.
+LowDoc,  LowDoc_is_nonstandard as a binary flag (1 if original value in 0/S/C/A/R). LowDoc_is_missing as a binary flag.
+
+belen
+DisbursementDate, del
+DisbursementGross, applicar estandarizacion y normalizacion ( separados, hacer pruebas con c/u)
+BalanceGross, si todo es 0 delete.
 Accept

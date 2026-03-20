@@ -103,7 +103,7 @@ Todos los modelos deben usar las mismas features base.
 
 ---
 
-## Fase 1 - Conocimiento del dominio
+## Fase 1 - Conocimiento del dominio DONE!!!
 
 - **Fecha:** 19 de marzo
 
@@ -132,7 +132,7 @@ Todos los modelos deben usar las mismas features base.
 
 ---
 
-## Fase 2 - Análisis exploratorio (EDA)
+## Fase 2 - Análisis exploratorio (EDA) DONE!!!
 
 - **Fecha:** 20 de marzo
 
@@ -154,7 +154,7 @@ Todos los modelos deben usar las mismas features base.
 
 Notebook EDA con:
 
-- visualizaciones
+- visualizaciones --> TODO
 - conclusiones
 - lista de features útiles
 - decisión conjunta sobre:

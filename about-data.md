@@ -343,3 +343,31 @@ Excellent data quality with 20,767 valid values (99.99%)
 ### BalanceGross
 
 are there any correlations between having a previous balance and new loan approvals? Can a model "see" this connections?
+
+---
+
+## Column Type Classification Table
+
+| Field             | Type                             | Category             | Notes                                                                                |
+| ----------------- | -------------------------------- | -------------------- | ------------------------------------------------------------------------------------ |
+| id                | Text (identifier)                | Categorical_Nominal  | Unique row id. High cardinality; drop from modeling features.                        |
+| LoanNr_ChkDgt     | Text (identifier)                | Categorical_Nominal  | Loan application id. Use for dedup/checks, not as predictive signal.                 |
+| Name              | Text                             | Categorical_Nominal  | Borrower name. Very high cardinality; typically avoid direct use.                    |
+| City              | Text                             | Categorical_Nominal  | Geographic category; can be grouped by frequency or encoded carefully.               |
+| State             | Text (2-letter code)             | Categorical_Nominal  | No inherent order. Good regional feature.                                            |
+| Bank              | Text                             | Categorical_Nominal  | Lender identity. High cardinality and potentially strong policy signal.              |
+| BankState         | Text (2-letter code)             | Categorical_Nominal  | State of the bank; can differ from borrower state.                                   |
+| ApprovalDate      | Date/Time                        | Categorical_Ordinal  | Time-ordered feature. Extract year/month/quarter instead of raw date text.           |
+| ApprovalFY        | Year (integer/text in source)    | Categorical_Ordinal  | Ordered fiscal year; can also be treated as Numerical_Discrete after cleaning.       |
+| NoEmp             | Integer count                    | Numerical_Discrete   | Employee count (0, 1, 2...). Consider handling suspicious zeros.                     |
+| NewExist          | Encoded category (1/2)           | Categorical_Ordinal  | 1 = existing, 2 = new. Ordered coding but behaves like a small categorical variable. |
+| CreateJob         | Integer count                    | Numerical_Discrete   | Number of jobs created. Non-negative count variable.                                 |
+| RetainedJob       | Integer count                    | Numerical_Discrete   | Number of jobs retained. Non-negative count variable.                                |
+| FranchiseCode     | Text/code                        | Categorical_Nominal  | Code values are labels, not magnitudes (even if numeric-looking).                    |
+| UrbanRural        | Encoded category (0/1/2)         | Categorical_Ordinal  | 0 = undefined, 1 = urban, 2 = rural. Encoded levels, not continuous distance.        |
+| RevLineCr         | Text flag                        | Categorical_Nominal  | Y/N plus non-standard values; normalize to stable buckets.                           |
+| LowDoc            | Text flag                        | Categorical_Nominal  | Y/N plus non-standard values; keep unknown/missing bucket.                           |
+| DisbursementDate  | Date/Time                        | Categorical_Ordinal  | Time-ordered event date; extract components for modeling.                            |
+| DisbursementGross | Currency (numeric after parsing) | Numerical_Continuous | Parse currency symbols/commas to numeric float/decimal.                              |
+| BalanceGross      | Currency (numeric after parsing) | Numerical_Continuous | Continuous monetary amount; often sparse/zero-heavy in practice.                     |
+| Accept            | Binary label (0/1)               | Categorical_Ordinal  | Target variable: 0 = not approved, 1 = approved.                                     |
