@@ -14,7 +14,7 @@ ApprovalFY, analize- does it match approval date year
 
 marilyn
 NewExist, One-hot encode NewExist (Existing, New, Unknown)
-CreateJob,  normalize (0 to 1)
+CreateJob,  normalize (0 to 1), standarized
 RetainedJob, is = to NoEmp? if yes then delete. is 1 to 1 with CreateJobs? 
 
 marla
