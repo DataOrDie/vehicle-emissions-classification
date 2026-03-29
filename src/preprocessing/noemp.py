@@ -3,7 +3,7 @@ import numpy as np
 def preprocess_noemp(df, option="raw", source_col="NoEmp"):
     """
     Opciones:
-        - raw: dejar NoEmp tal cual
+        - raw: dejar NoEmp tal cual caso Bagging
         - log: aplicar log1p
         - binning: categorizar tamaño empresa
     """
