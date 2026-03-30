@@ -12,10 +12,6 @@ import pandas as pd
 
 DEFAULT_REVLINECR_OPTION = "A"
 
-
-# =========================
-# 1. CLEANING
-# =========================
 def clean_revlinecr(series: pd.Series) -> pd.Series:
     """
     Clean RevLineCr values:
@@ -26,13 +22,10 @@ def clean_revlinecr(series: pd.Series) -> pd.Series:
 
     cleaned = series.astype("string").str.strip()
 
-    # Missing values
     cleaned = cleaned.fillna("MISSING")
 
-    # Define valid values
     valid_values = ["Y", "N", "MISSING"]
 
-    # Anything not valid → UNKNOWN
     cleaned = cleaned.apply(
         lambda x: x if x in valid_values else "UNKNOWN"
     )
@@ -40,18 +33,11 @@ def clean_revlinecr(series: pd.Series) -> pd.Series:
     return cleaned
 
 
-# =========================
-# 2. PREPROCESSING
-# =========================
 def preprocess_revlinecr_option_a(
     df: pd.DataFrame,
     source_col: str = "RevLineCr",
 ) -> pd.DataFrame:
-    """
-    Option A:
-    - Clean values
-    - Add indicator variables
-    """
+    """Option A: clean + indicators + one-hot"""
 
     if source_col not in df.columns:
         raise KeyError(f"Column '{source_col}' not found in DataFrame")
@@ -59,13 +45,14 @@ def preprocess_revlinecr_option_a(
     result = df.copy()
 
     # CLEANING
-    result["RevLineCr_clean"] = clean_revlinecr(result[source_col])
+    clean_col = clean_revlinecr(result[source_col])
+    result["RevLineCr_clean"] = clean_col
 
     # INDICATORS
-    result["revlinecr_is_nonstandard"] = (result["RevLineCr_clean"] == "UNKNOWN").astype(int)
-    result["revlinecr_is_missing"] = (result["RevLineCr_clean"] == "MISSING").astype(int)
+    result["revlinecr_is_nonstandard"] = (clean_col == "UNKNOWN").astype(int)
+    result["revlinecr_is_missing"] = (clean_col == "MISSING").astype(int)
 
-    # ONE HOT
+    # ONE HOT (y elimina la columna original limpia)
     result = pd.get_dummies(result, columns=["RevLineCr_clean"], prefix="revlinecr")
 
     return result
@@ -75,29 +62,20 @@ def preprocess_revlinecr_option_b(
     df: pd.DataFrame,
     source_col: str = "RevLineCr",
 ) -> pd.DataFrame:
-    """
-    Option B:
-    - Clean values
-    - Only one-hot encoding
-    """
+    """Option B: clean + one-hot only"""
 
     if source_col not in df.columns:
         raise KeyError(f"Column '{source_col}' not found in DataFrame")
 
     result = df.copy()
 
-    # CLEANING
-    result["RevLineCr_clean"] = clean_revlinecr(result[source_col])
+    clean_col = clean_revlinecr(result[source_col])
+    result["RevLineCr_clean"] = clean_col
 
-    # ONE HOT
     result = pd.get_dummies(result, columns=["RevLineCr_clean"], prefix="revlinecr")
 
     return result
 
-
-# =========================
-# 3. DISPATCH FUNCTION
-# =========================
 def preprocess_revlinecr(
     df: pd.DataFrame,
     option: str = DEFAULT_REVLINECR_OPTION,
