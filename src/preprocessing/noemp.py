@@ -10,6 +10,7 @@ def preprocess_noemp(df, option="raw", source_col="NoEmp"):
 
     if option == "log":
         df[source_col + "_Log"] = np.log1p(df[source_col])
+        df = df.drop([source_col], axis=1, errors='ignore')
 
     elif option == "binning":
         def categorize(n):
@@ -20,6 +21,7 @@ def preprocess_noemp(df, option="raw", source_col="NoEmp"):
             else:
                 return 3
         df[source_col + "_Bin"] = df[source_col].apply(categorize)
+        df = df.drop([source_col], axis=1, errors='ignore')
 
     elif option == "raw":
         pass
