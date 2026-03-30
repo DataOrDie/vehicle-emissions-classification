@@ -1,4 +1,4 @@
-def clean_base_columns(df, local_state="IL"):
+def clean_base_columns(df):
     """
     Limpia columnas generales de forma robusta e idempotente:
     - Elimina columnas inútiles
