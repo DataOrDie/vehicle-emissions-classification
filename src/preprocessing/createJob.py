@@ -64,7 +64,7 @@ def preprocess_createjob_option_a(
 
 	result[source_col] = createjob_num
 	result["createjob_normalized"] = _min_max_normalize(createjob_num)
-
+	result = result.drop(columns=[source_col])
 	return result
 
 
@@ -81,7 +81,7 @@ def preprocess_createjob_option_b(
 
 	result[source_col] = createjob_num
 	result["createjob_standardized"] = _zscore_standardize(createjob_num)
-
+	result = result.drop(columns=[source_col])
 	return result
 
 

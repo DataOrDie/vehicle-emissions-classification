@@ -8,14 +8,16 @@ Bank, analize which banks are more lenient
 BankState, -> match-to-state? Y|N
 NoEmp, applicar estandarizacion y normalizacion ( separados, hacer pruebas con c/u)
 
-Ivan
-ApprovalDate, del
-ApprovalFY, analize- does it match approval date year
-
 marilyn
 NewExist, One-hot encode NewExist (Existing, New, Unknown)
 CreateJob,  normalize (0 to 1), standarized
 RetainedJob, is = to NoEmp? if yes then delete. is 1 to 1 with CreateJobs? 
+
+Ivan
+ApprovalDate, del
+ApprovalFY, analize- does it match approval date year
+
+
 
 marla
 FranchiseCode, create binary yes\no One-Hot Encoding

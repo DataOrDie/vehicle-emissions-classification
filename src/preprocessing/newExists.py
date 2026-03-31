@@ -60,6 +60,7 @@ def preprocess_newexist_option_a(
 	# Nullable boolean masks can contain <NA>; fill before integer casting.
 	result["is_new_business"] = (newexist_num == 2).fillna(False).astype(int)
 	result["newexist_missing_or_invalid"] = invalid_mask.fillna(True).astype(int)
+	result = result.drop(columns=[source_col])
 
 	return result
 
@@ -84,6 +85,7 @@ def preprocess_newexist_option_b(
 
 	result = result[result[source_col].notna()].copy()
 	result["is_new_business"] = (result[source_col] == 2).fillna(False).astype(int)
+	result = result.drop(columns=[source_col])
 
 	return result
 
@@ -111,4 +113,5 @@ def preprocess_newexist(
 	if option_upper == "B":
 		return preprocess_newexist_option_b(df=df, source_col=source_col)
 
+	
 	raise ValueError("option must be 'A' or 'B'")

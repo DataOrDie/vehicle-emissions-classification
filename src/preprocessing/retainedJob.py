@@ -64,7 +64,7 @@ def preprocess_retainedjob_option_a(
 
 	result[source_col] = retainedjob_num
 	result["retainedjob_normalized"] = _min_max_normalize(retainedjob_num)
-
+	result = result.drop(columns=[source_col])
 	return result
 
 
@@ -81,7 +81,7 @@ def preprocess_retainedjob_option_b(
 
 	result[source_col] = retainedjob_num
 	result["retainedjob_standardized"] = _zscore_standardize(retainedjob_num)
-
+	result = result.drop(columns=[source_col])
 	return result
 
 
