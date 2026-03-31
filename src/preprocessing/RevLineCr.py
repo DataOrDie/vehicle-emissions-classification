@@ -9,11 +9,17 @@ ALLOWED_REVLINECR_OPTIONS = {"A", "B", "C"}
 def clean_revlinecr(series: pd.Series) -> pd.Series:
     """
     Clean RevLineCr values:
-    - Y, N → valid
-    - Others → UNKNOWN
-    - NaN → MISSING
+    - Y, N → valid (case-insensitive)
+    - Blanks and NaN → MISSING
+    - Others (0, T, Q) → UNKNOWN
     """
+    # Normalize: strip whitespace and uppercase for case-insensitive matching
     cleaned = series.astype("string").str.strip().str.upper()
+    
+    # Map empty strings (blanks after stripping) to MISSING
+    cleaned = cleaned.replace("", "MISSING")
+    
+    # Map NaN to MISSING
     cleaned = cleaned.fillna("MISSING")
 
     valid_values = ["Y", "N", "MISSING"]
@@ -62,3 +68,31 @@ def preprocess_revlinecr(
         df = df.drop(columns=["RevLineCr_clean", source_col], errors="ignore")
 
     return df
+
+
+
+# future work:
+# Policy X is missing
+# You described: 0 -> N, T/Q -> UNKNOWN.
+# Current code does not implement this branch even though option exists.
+
+# Policy X is missing
+# You described: keep 0 as its own category and group T/Q.
+# Current code always collapses all non-standard values into UNKNOWN.
+
+# Option selector is mostly unused
+# option is accepted, but only option A has behavior.
+
+# Practical default variant (Unknown+Missing merged) is missing
+# Your notes include a compact fallback bucket for some cases; current code keeps UNKNOWN and MISSING separate only.
+
+# Ablation-ready modes are missing
+# Your notes suggest testing:
+
+# Y/N only
+# Y/N/UNKNOWN/MISSING
+# Y/N + indicator flags
+# Current code only supports one output pattern.
+# Normalization robustness is missing
+# Current cleaning does not uppercase values, so lowercase y/n becomes UNKNOWN.
+# Blank strings also become UNKNOWN rather than MISSING, which may or may not match your intent.
