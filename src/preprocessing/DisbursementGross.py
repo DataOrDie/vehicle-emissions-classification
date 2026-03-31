@@ -20,10 +20,18 @@ def _to_numeric_disbursementgross(series: pd.Series) -> pd.Series:
 
 	- Trims whitespace
 	- Converts blank strings to missing
+	- Removes currency symbols and thousands separators
 	- Coerces non-numeric values to missing
 	"""
 	cleaned = series.astype("string").str.strip()
 	cleaned = cleaned.mask(cleaned.fillna("").eq(""), pd.NA)
+
+	cleaned = (
+		cleaned
+		.str.replace("$", "", regex=False)
+		.str.replace(",", "", regex=False)
+	)
+
 	return pd.to_numeric(cleaned, errors="coerce")
 
 
@@ -60,8 +68,8 @@ def preprocess_disbursementgross_option_a(
 	result = df.copy()
 	disbursementgross_num = _to_numeric_disbursementgross(result[source_col])
 
-	result[source_col] = disbursementgross_num
-	result["disbursementgross_normalized"] = _min_max_normalize(disbursementgross_num)
+	#Sobrescribir columna original
+	result[source_col] = _min_max_normalize(disbursementgross_num)
 
 	return result
 
@@ -77,8 +85,8 @@ def preprocess_disbursementgross_option_b(
 	result = df.copy()
 	disbursementgross_num = _to_numeric_disbursementgross(result[source_col])
 
-	result[source_col] = disbursementgross_num
-	result["disbursementgross_standardized"] = _zscore_standardize(disbursementgross_num)
+	# Sobrescribir columna original
+	result[source_col] = _zscore_standardize(disbursementgross_num)
 
 	return result
 
@@ -88,17 +96,7 @@ def preprocess_disbursementgross(
 	option: str = DEFAULT_DISBURSEMENTGROSS_OPTION,
 	source_col: str = "DisbursementGross",
 ) -> pd.DataFrame:
-	"""Dispatch DisbursementGross preprocessing based on selected option.
-
-	Parameters
-	----------
-	df : pd.DataFrame
-		Input dataset.
-	option : str
-		"A" for Option A (normalize), "B" for Option B (standardize).
-	source_col : str
-		Column name for DisbursementGross.
-	"""
+	"""Dispatch DisbursementGross preprocessing based on selected option."""
 	option_upper = option.upper()
 
 	if option_upper == "A":
