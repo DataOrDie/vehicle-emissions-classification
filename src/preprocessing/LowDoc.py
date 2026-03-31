@@ -12,6 +12,7 @@ import pandas as pd
 
 DEFAULT_LOWDOC_OPTION = "A"
 
+
 def clean_lowdoc(series: pd.Series) -> pd.Series:
     """
     Clean LowDoc values:
@@ -21,7 +22,6 @@ def clean_lowdoc(series: pd.Series) -> pd.Series:
     """
 
     cleaned = series.astype("string").str.strip()
-
     cleaned = cleaned.fillna("MISSING")
 
     valid_values = ["Y", "N", "MISSING"]
@@ -32,9 +32,10 @@ def clean_lowdoc(series: pd.Series) -> pd.Series:
 
     return cleaned
 
+
 def preprocess_lowdoc_option_a(
     df: pd.DataFrame,
-    source_col: str = "LowDoc",
+    source_col: str,
 ) -> pd.DataFrame:
     """Option A: clean + indicators + one-hot"""
 
@@ -51,14 +52,18 @@ def preprocess_lowdoc_option_a(
     result["lowdoc_is_missing"] = (clean_col == "MISSING").astype(int)
 
     # ONE HOT
-    result = pd.get_dummies(result, columns=["LowDoc_clean"], prefix="lowdoc")
+    result = pd.get_dummies(
+        result,
+        columns=["LowDoc_clean"],
+        prefix="lowdoc"
+    )
 
     return result
 
 
 def preprocess_lowdoc_option_b(
     df: pd.DataFrame,
-    source_col: str = "LowDoc",
+    source_col: str,
 ) -> pd.DataFrame:
     """Option B: clean + one-hot only"""
 
@@ -70,19 +75,25 @@ def preprocess_lowdoc_option_b(
     clean_col = clean_lowdoc(result[source_col])
     result["LowDoc_clean"] = clean_col
 
-    result = pd.get_dummies(result, columns=["LowDoc_clean"], prefix="lowdoc")
+    result = pd.get_dummies(
+        result,
+        columns=["LowDoc_clean"],
+        prefix="lowdoc"
+    )
 
     return result
+
 
 def preprocess_lowdoc(
     df: pd.DataFrame,
     option: str = DEFAULT_LOWDOC_OPTION,
+    source_col: str = "LowDoc",
 ) -> pd.DataFrame:
 
     if option.upper() == "A":
-        return preprocess_lowdoc_option_a(df)
+        return preprocess_lowdoc_option_a(df, source_col)
 
     if option.upper() == "B":
-        return preprocess_lowdoc_option_b(df)
+        return preprocess_lowdoc_option_b(df, source_col)
 
     raise ValueError("option must be 'A' or 'B'")
