@@ -242,9 +242,9 @@ class_weight = {0: reject_class_weight, 1: 1.0} if balance_strategy == "class_we
 svc_max_iter: int = 50000
 svc_cache_size_mb: int = 1024
 
-# Keep this intentionally small to control kernel SVM training cost.
-c_candidates = [0.5, 1.0, 2.0]
-gamma_candidates = ["scale", 0.01, 0.001]
+# Expanded grid now that runtime is acceptable.
+c_candidates = [0.25, 0.5, 1.0, 2.0, 4.0]
+gamma_candidates = ["scale", 0.03, 0.01, 0.003, 0.001]
 
 run = wandb.init(
     project="MS Geometric - SVM",
