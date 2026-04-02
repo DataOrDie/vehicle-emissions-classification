@@ -59,8 +59,8 @@ print("[SECTION] Configuring preprocessing options")
 noemp_option: str = "C"
 newexist_option: str = "B" # do not change
 createjob_option: str = "C" # same
-retainedjob_option: str = "C" # same
-disbursementgross_option: str = "B" 
+retainedjob_option: str = "B" # same
+disbursementgross_option: str = "C" 
 
 approvaldate_option: str = "A" # only A
 approvalfy_option: str = "A" # only A
