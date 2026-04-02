@@ -150,9 +150,9 @@ print("[SECTION] Configuring class balance strategy")
 # use_scaler = True
 use_scaler = False
 
-# balance_strategy: str = "class_weight"
+balance_strategy: str = "class_weight"
 # balance_strategy: str = "oversample_reject"
-balance_strategy: str = "undersample_approve"
+# balance_strategy: str = "undersample_approve"
 # Options:
 #   - "none"
 #   - "class_weight"
