@@ -10,7 +10,9 @@ from sklearn.metrics import (
     average_precision_score,
     classification_report,
     confusion_matrix,
+    balanced_accuracy_score,
     f1_score,
+    matthews_corrcoef,
     precision_recall_curve,
     precision_score,
     recall_score,
@@ -318,6 +320,7 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
         "roc_auc": roc_auc_score(y_fold_val, y_fold_score),
         "pr_auc": average_precision_score(y_fold_val, y_fold_score),
         "f1": f1_score(y_fold_val, y_fold_pred),
+        "macro_f1": f1_score(y_fold_val, y_fold_pred, average="macro", zero_division=0),
         "precision": precision_score(y_fold_val, y_fold_pred),
         "recall": recall_score(y_fold_val, y_fold_pred),
         "accuracy": accuracy_score(y_fold_val, y_fold_pred),
@@ -328,7 +331,8 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
         f"Fold {fold_idx} | "
         f"ROC-AUC={fold_metrics['roc_auc']:.4f} "
         f"PR-AUC={fold_metrics['pr_auc']:.4f} "
-        f"F1={fold_metrics['f1']:.4f}"
+        f"F1={fold_metrics['f1']:.4f} "
+        f"Macro-F1={fold_metrics['macro_f1']:.4f}"
     )
 
     wandb.log(
@@ -337,6 +341,7 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
             "cv/roc_auc": fold_metrics["roc_auc"],
             "cv/pr_auc": fold_metrics["pr_auc"],
             "cv/f1": fold_metrics["f1"],
+            "cv/macro_f1": fold_metrics["macro_f1"],
             "cv/precision": fold_metrics["precision"],
             "cv/recall": fold_metrics["recall"],
             "cv/accuracy": fold_metrics["accuracy"],
@@ -350,6 +355,8 @@ cv_summary = {
     "cv_std_pr_auc": float(np.std([m["pr_auc"] for m in cv_fold_metrics])),
     "cv_mean_f1": float(np.mean([m["f1"] for m in cv_fold_metrics])),
     "cv_std_f1": float(np.std([m["f1"] for m in cv_fold_metrics])),
+    "cv_mean_macro_f1": float(np.mean([m["macro_f1"] for m in cv_fold_metrics])),
+    "cv_std_macro_f1": float(np.std([m["macro_f1"] for m in cv_fold_metrics])),
     "cv_mean_precision": float(np.mean([m["precision"] for m in cv_fold_metrics])),
     "cv_std_precision": float(np.std([m["precision"] for m in cv_fold_metrics])),
     "cv_mean_recall": float(np.mean([m["recall"] for m in cv_fold_metrics])),
@@ -359,7 +366,7 @@ cv_summary = {
 }
 
 print("[SECTION] Cross-validation summary")
-for metric_name in ["roc_auc", "pr_auc", "f1", "precision", "recall", "accuracy"]:
+for metric_name in ["roc_auc", "pr_auc", "f1", "macro_f1", "precision", "recall", "accuracy"]:
     print(
         f"CV {metric_name.upper()}: "
         f"{cv_summary[f'cv_mean_{metric_name}']:.4f} +/- "
@@ -368,13 +375,14 @@ for metric_name in ["roc_auc", "pr_auc", "f1", "precision", "recall", "accuracy"
 
 # Log fold-level table and CV aggregate summary to W&B.
 cv_table = wandb.Table(
-    columns=["fold", "roc_auc", "pr_auc", "f1", "precision", "recall", "accuracy"],
+    columns=["fold", "roc_auc", "pr_auc", "f1", "macro_f1", "precision", "recall", "accuracy"],
     data=[
         [
             int(m["fold"]),
             float(m["roc_auc"]),
             float(m["pr_auc"]),
             float(m["f1"]),
+            float(m["macro_f1"]),
             float(m["precision"]),
             float(m["recall"]),
             float(m["accuracy"]),
@@ -405,6 +413,7 @@ metrics = {
     "ROC-AUC": roc_auc_score(y_holdout, y_score),
     "PR-AUC": average_precision_score(y_holdout, y_score),
     "F1": f1_score(y_holdout, y_pred),
+    "Macro-F1": f1_score(y_holdout, y_pred, average="macro", zero_division=0),
     "Precision": precision_score(y_holdout, y_pred),
     "Recall": recall_score(y_holdout, y_pred),
     "Accuracy": accuracy_score(y_holdout, y_pred),
