@@ -227,8 +227,8 @@ def score_threshold(y_true: pd.Series, y_pred: np.ndarray, metric_name: str) -> 
 # Model config and W&B run
 # -----------------------------------------------------------------------------
 print("[SECTION] Initializing model config and W&B run")
-use_scaler = True
-# use_scaler = False
+# use_scaler = True
+use_scaler = False
 class_weight = {0: reject_class_weight, 1: 1.0} if balance_strategy == "class_weight" else None
 
 run = wandb.init(
