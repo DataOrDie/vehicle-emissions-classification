@@ -229,6 +229,43 @@ def score_threshold(y_true: pd.Series, y_pred: np.ndarray, metric_name: str) -> 
     raise ValueError(f"Unknown optimize_metric: {metric_name}")
 
 
+def find_best_threshold(
+    y_true: pd.Series,
+    scores: np.ndarray,
+    optimize_metric: str,
+    n_candidates: int = 101,
+) -> tuple[float, float]:
+    """Select the threshold that maximizes the chosen validation metric."""
+
+    scores = np.asarray(scores, dtype=float)
+    if scores.size == 0:
+        return 0.0, float("nan")
+
+    low = float(np.quantile(scores, 0.01))
+    high = float(np.quantile(scores, 0.99))
+    if low == high:
+        threshold = 0.0
+        preds = predict_with_threshold(scores, threshold)
+        return threshold, score_threshold(y_true, preds, optimize_metric)
+
+    candidate_thresholds = np.unique(
+        np.concatenate([np.linspace(low, high, n_candidates), np.array([0.0])])
+    )
+
+    best_threshold = 0.0
+    best_metric = -np.inf
+    for threshold in candidate_thresholds:
+        preds = predict_with_threshold(scores, float(threshold))
+        metric_value = score_threshold(y_true, preds, optimize_metric)
+        if (metric_value > best_metric) or (
+            metric_value == best_metric and abs(float(threshold)) < abs(best_threshold)
+        ):
+            best_metric = float(metric_value)
+            best_threshold = float(threshold)
+
+    return best_threshold, best_metric
+
+
 # -----------------------------------------------------------------------------
 # Model config and W&B run
 # -----------------------------------------------------------------------------
@@ -244,6 +281,9 @@ c_candidates = [0.5, 1.0, 2.0]
 gamma_candidates = ["scale", 0.01, 0.001]
 degree_candidates = [2, 3, 4]
 coef0_candidates = [0.0, 1.0]
+
+optimize_metric: str = "macro_f1"
+threshold_candidates_per_fold: int = 101
 
 # # Expanded grid now that runtime is acceptable.
 # c_candidates = [0.25, 0.5, 1.0, 2.0, 4.0]
@@ -264,6 +304,8 @@ run = wandb.init(
         "gamma_candidates": gamma_candidates,
         "degree_candidates": degree_candidates,
         "coef0_candidates": coef0_candidates,
+        "optimize_metric": optimize_metric,
+        "threshold_candidates_per_fold": threshold_candidates_per_fold,
         "noemp_option": noemp_option,
         "newexist_option": newexist_option,
         "createjob_option": createjob_option,
@@ -413,6 +455,7 @@ svm_pipeline = Pipeline(
 print("[SECTION] Running cross-validation on train/val split")
 cv_start_time = time.perf_counter()
 cv_fold_metrics = []
+cv_best_thresholds = []
 
 for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval), 1):
     X_fold_train = X_trainval.iloc[train_idx]
@@ -449,18 +492,33 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
     )
     fold_pipeline.fit(X_fold_train, y_fold_train)
 
-    y_fold_pred = fold_pipeline.predict(X_fold_val)
     y_fold_score = fold_pipeline.decision_function(X_fold_val)
+    y_fold_pred_default = fold_pipeline.predict(X_fold_val)
+    fold_best_threshold, fold_best_metric = find_best_threshold(
+        y_true=y_fold_val,
+        scores=y_fold_score,
+        optimize_metric=optimize_metric,
+        n_candidates=threshold_candidates_per_fold,
+    )
+    cv_best_thresholds.append(fold_best_threshold)
+    y_fold_pred_tuned = predict_with_threshold(y_fold_score, fold_best_threshold)
 
     fold_metrics = {
         "fold": fold_idx,
         "roc_auc": roc_auc_score(y_fold_val, y_fold_score),
         "pr_auc": average_precision_score(y_fold_val, y_fold_score),
-        "f1": f1_score(y_fold_val, y_fold_pred),
-        "macro_f1": f1_score(y_fold_val, y_fold_pred, average="macro", zero_division=0),
-        "precision": precision_score(y_fold_val, y_fold_pred),
-        "recall": recall_score(y_fold_val, y_fold_pred),
-        "accuracy": accuracy_score(y_fold_val, y_fold_pred),
+        "f1": f1_score(y_fold_val, y_fold_pred_default, zero_division=0),
+        "macro_f1": f1_score(y_fold_val, y_fold_pred_default, average="macro", zero_division=0),
+        "precision": precision_score(y_fold_val, y_fold_pred_default, zero_division=0),
+        "recall": recall_score(y_fold_val, y_fold_pred_default, zero_division=0),
+        "accuracy": accuracy_score(y_fold_val, y_fold_pred_default),
+        "best_threshold": fold_best_threshold,
+        "best_threshold_metric": fold_best_metric,
+        "tuned_f1": f1_score(y_fold_val, y_fold_pred_tuned, zero_division=0),
+        "tuned_macro_f1": f1_score(y_fold_val, y_fold_pred_tuned, average="macro", zero_division=0),
+        "tuned_precision": precision_score(y_fold_val, y_fold_pred_tuned, zero_division=0),
+        "tuned_recall": recall_score(y_fold_val, y_fold_pred_tuned, zero_division=0),
+        "tuned_accuracy": accuracy_score(y_fold_val, y_fold_pred_tuned),
     }
     cv_fold_metrics.append(fold_metrics)
 
@@ -469,7 +527,9 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
         f"ROC-AUC={fold_metrics['roc_auc']:.4f} "
         f"PR-AUC={fold_metrics['pr_auc']:.4f} "
         f"F1={fold_metrics['f1']:.4f} "
-        f"Macro-F1={fold_metrics['macro_f1']:.4f}"
+        f"Macro-F1={fold_metrics['macro_f1']:.4f} "
+        f"| tuned threshold={fold_metrics['best_threshold']:.4f} "
+        f"tuned Macro-F1={fold_metrics['tuned_macro_f1']:.4f}"
     )
 
     wandb.log(
@@ -482,8 +542,18 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
             "cv/precision": fold_metrics["precision"],
             "cv/recall": fold_metrics["recall"],
             "cv/accuracy": fold_metrics["accuracy"],
+            "cv/best_threshold": fold_metrics["best_threshold"],
+            "cv/best_threshold_metric": fold_metrics["best_threshold_metric"],
+            "cv/tuned_f1": fold_metrics["tuned_f1"],
+            "cv/tuned_macro_f1": fold_metrics["tuned_macro_f1"],
+            "cv/tuned_precision": fold_metrics["tuned_precision"],
+            "cv/tuned_recall": fold_metrics["tuned_recall"],
+            "cv/tuned_accuracy": fold_metrics["tuned_accuracy"],
         }
     )
+
+selected_threshold = float(np.median(cv_best_thresholds))
+run.summary["selected_threshold"] = selected_threshold
 
 cv_summary = {
     "cv_mean_roc_auc": float(np.mean([m["roc_auc"] for m in cv_fold_metrics])),
@@ -500,6 +570,19 @@ cv_summary = {
     "cv_std_recall": float(np.std([m["recall"] for m in cv_fold_metrics])),
     "cv_mean_accuracy": float(np.mean([m["accuracy"] for m in cv_fold_metrics])),
     "cv_std_accuracy": float(np.std([m["accuracy"] for m in cv_fold_metrics])),
+    "cv_mean_threshold": float(np.mean(cv_best_thresholds)),
+    "cv_std_threshold": float(np.std(cv_best_thresholds)),
+    "cv_selected_threshold": selected_threshold,
+    "cv_mean_tuned_f1": float(np.mean([m["tuned_f1"] for m in cv_fold_metrics])),
+    "cv_std_tuned_f1": float(np.std([m["tuned_f1"] for m in cv_fold_metrics])),
+    "cv_mean_tuned_macro_f1": float(np.mean([m["tuned_macro_f1"] for m in cv_fold_metrics])),
+    "cv_std_tuned_macro_f1": float(np.std([m["tuned_macro_f1"] for m in cv_fold_metrics])),
+    "cv_mean_tuned_precision": float(np.mean([m["tuned_precision"] for m in cv_fold_metrics])),
+    "cv_std_tuned_precision": float(np.std([m["tuned_precision"] for m in cv_fold_metrics])),
+    "cv_mean_tuned_recall": float(np.mean([m["tuned_recall"] for m in cv_fold_metrics])),
+    "cv_std_tuned_recall": float(np.std([m["tuned_recall"] for m in cv_fold_metrics])),
+    "cv_mean_tuned_accuracy": float(np.mean([m["tuned_accuracy"] for m in cv_fold_metrics])),
+    "cv_std_tuned_accuracy": float(np.std([m["tuned_accuracy"] for m in cv_fold_metrics])),
 }
 
 cv_elapsed = time.perf_counter() - cv_start_time
@@ -511,11 +594,38 @@ for metric_name in ["roc_auc", "pr_auc", "f1", "macro_f1", "precision", "recall"
         f"{cv_summary[f'cv_mean_{metric_name}']:.4f} +/- "
         f"{cv_summary[f'cv_std_{metric_name}']:.4f}"
     )
+for metric_name in ["f1", "macro_f1", "precision", "recall", "accuracy"]:
+    print(
+        f"CV TUNED_{metric_name.upper()}: "
+        f"{cv_summary[f'cv_mean_tuned_{metric_name}']:.4f} +/- "
+        f"{cv_summary[f'cv_std_tuned_{metric_name}']:.4f}"
+    )
+print(
+    f"CV threshold ({optimize_metric}) mean={cv_summary['cv_mean_threshold']:.4f} "
+    f"std={cv_summary['cv_std_threshold']:.4f} "
+    f"selected(median)={cv_summary['cv_selected_threshold']:.4f}"
+)
 print(f"[TIMING] CV completed in {cv_elapsed:.2f} seconds ({cv_elapsed/60:.2f} minutes)")
 
 # Log fold-level table and CV aggregate summary to W&B.
 cv_table = wandb.Table(
-    columns=["fold", "roc_auc", "pr_auc", "f1", "macro_f1", "precision", "recall", "accuracy"],
+    columns=[
+        "fold",
+        "roc_auc",
+        "pr_auc",
+        "f1",
+        "macro_f1",
+        "precision",
+        "recall",
+        "accuracy",
+        "best_threshold",
+        "best_threshold_metric",
+        "tuned_f1",
+        "tuned_macro_f1",
+        "tuned_precision",
+        "tuned_recall",
+        "tuned_accuracy",
+    ],
     data=[
         [
             int(m["fold"]),
@@ -526,6 +636,13 @@ cv_table = wandb.Table(
             float(m["precision"]),
             float(m["recall"]),
             float(m["accuracy"]),
+            float(m["best_threshold"]),
+            float(m["best_threshold_metric"]),
+            float(m["tuned_f1"]),
+            float(m["tuned_macro_f1"]),
+            float(m["tuned_precision"]),
+            float(m["tuned_recall"]),
+            float(m["tuned_accuracy"]),
         ]
         for m in cv_fold_metrics
     ],
@@ -546,29 +663,49 @@ else:
 svm_pipeline.fit(X_trainval_fit, y_trainval_fit)
 
 print("[SECTION] Running holdout predictions and metric evaluation")
-y_pred = svm_pipeline.predict(X_holdout)
+y_pred_default = svm_pipeline.predict(X_holdout)
 y_score = svm_pipeline.decision_function(X_holdout)
+y_pred_tuned = predict_with_threshold(y_score, selected_threshold)
 
-metrics = {
+metrics_default = {
     "ROC-AUC": roc_auc_score(y_holdout, y_score),
     "PR-AUC": average_precision_score(y_holdout, y_score),
-    "F1": f1_score(y_holdout, y_pred),
-    "Macro-F1": f1_score(y_holdout, y_pred, average="macro", zero_division=0),
-    "Precision": precision_score(y_holdout, y_pred),
-    "Recall": recall_score(y_holdout, y_pred),
-    "Accuracy": accuracy_score(y_holdout, y_pred),
+    "F1": f1_score(y_holdout, y_pred_default, zero_division=0),
+    "Macro-F1": f1_score(y_holdout, y_pred_default, average="macro", zero_division=0),
+    "Precision": precision_score(y_holdout, y_pred_default, zero_division=0),
+    "Recall": recall_score(y_holdout, y_pred_default, zero_division=0),
+    "Accuracy": accuracy_score(y_holdout, y_pred_default),
 }
 
-cm = confusion_matrix(y_holdout, y_pred)
-report = classification_report(y_holdout, y_pred, output_dict=True)
-positive_rate = float((y_pred == 1).mean())
+metrics_tuned = {
+    "ROC-AUC": roc_auc_score(y_holdout, y_score),
+    "PR-AUC": average_precision_score(y_holdout, y_score),
+    "F1": f1_score(y_holdout, y_pred_tuned, zero_division=0),
+    "Macro-F1": f1_score(y_holdout, y_pred_tuned, average="macro", zero_division=0),
+    "Precision": precision_score(y_holdout, y_pred_tuned, zero_division=0),
+    "Recall": recall_score(y_holdout, y_pred_tuned, zero_division=0),
+    "Accuracy": accuracy_score(y_holdout, y_pred_tuned),
+}
+
+cm_default = confusion_matrix(y_holdout, y_pred_default)
+cm_tuned = confusion_matrix(y_holdout, y_pred_tuned)
+report = classification_report(y_holdout, y_pred_tuned, output_dict=True)
+positive_rate_default = float((y_pred_default == 1).mean())
+positive_rate_tuned = float((y_pred_tuned == 1).mean())
 score_mean = float(y_score.mean())
 score_std = float(y_score.std())
 
 print(f"Use StandardScaler: {use_scaler}")
-for name, value in metrics.items():
-    print(f"{name}: {value:.4f}")
-print(f"Predicted positive rate: {positive_rate:.4f}")
+print(f"Selected decision threshold ({optimize_metric}): {selected_threshold:.4f}")
+print("Default threshold metrics (decision_function >= 0):")
+for name, value in metrics_default.items():
+    print(f"  {name}: {value:.4f}")
+print(f"  Predicted positive rate: {positive_rate_default:.4f}")
+
+print("Tuned threshold metrics (CV-derived threshold):")
+for name, value in metrics_tuned.items():
+    print(f"  {name}: {value:.4f}")
+print(f"  Predicted positive rate: {positive_rate_tuned:.4f}")
 
 
 # -----------------------------------------------------------------------------
@@ -580,14 +717,14 @@ precision, recall, _ = precision_recall_curve(y_holdout, y_score)
 
 fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-axes[0].plot(fpr, tpr, label=f"ROC-AUC = {metrics['ROC-AUC']:.4f}")
+axes[0].plot(fpr, tpr, label=f"ROC-AUC = {metrics_tuned['ROC-AUC']:.4f}")
 axes[0].plot([0, 1], [0, 1], "k--", alpha=0.7)
 axes[0].set_title("ROC Curve")
 axes[0].set_xlabel("False Positive Rate")
 axes[0].set_ylabel("True Positive Rate")
 axes[0].legend()
 
-axes[1].plot(recall, precision, label=f"PR-AUC = {metrics['PR-AUC']:.4f}")
+axes[1].plot(recall, precision, label=f"PR-AUC = {metrics_tuned['PR-AUC']:.4f}")
 axes[1].set_title("Precision-Recall Curve")
 axes[1].set_xlabel("Recall")
 axes[1].set_ylabel("Precision")
@@ -603,31 +740,59 @@ plt.tight_layout()
 print("[SECTION] Logging metrics and artifacts to W&B")
 wandb.log(
     {
-        "roc_auc": metrics["ROC-AUC"],
-        "pr_auc": metrics["PR-AUC"],
-        "f1": metrics["F1"],
-        "macro_f1": metrics["Macro-F1"],
-        "precision": metrics["Precision"],
-        "recall": metrics["Recall"],
-        "accuracy": metrics["Accuracy"],
-        "predicted_positive_rate": positive_rate,
+        "holdout/threshold": selected_threshold,
+        "holdout/default_roc_auc": metrics_default["ROC-AUC"],
+        "holdout/default_pr_auc": metrics_default["PR-AUC"],
+        "holdout/default_f1": metrics_default["F1"],
+        "holdout/default_macro_f1": metrics_default["Macro-F1"],
+        "holdout/default_precision": metrics_default["Precision"],
+        "holdout/default_recall": metrics_default["Recall"],
+        "holdout/default_accuracy": metrics_default["Accuracy"],
+        "holdout/default_predicted_positive_rate": positive_rate_default,
+        "holdout/tuned_roc_auc": metrics_tuned["ROC-AUC"],
+        "holdout/tuned_pr_auc": metrics_tuned["PR-AUC"],
+        "holdout/tuned_f1": metrics_tuned["F1"],
+        "holdout/tuned_macro_f1": metrics_tuned["Macro-F1"],
+        "holdout/tuned_precision": metrics_tuned["Precision"],
+        "holdout/tuned_recall": metrics_tuned["Recall"],
+        "holdout/tuned_accuracy": metrics_tuned["Accuracy"],
+        "holdout/tuned_predicted_positive_rate": positive_rate_tuned,
+        "roc_auc": metrics_tuned["ROC-AUC"],
+        "pr_auc": metrics_tuned["PR-AUC"],
+        "f1": metrics_tuned["F1"],
+        "macro_f1": metrics_tuned["Macro-F1"],
+        "precision": metrics_tuned["Precision"],
+        "recall": metrics_tuned["Recall"],
+        "accuracy": metrics_tuned["Accuracy"],
+        "predicted_positive_rate": positive_rate_tuned,
         "decision_score_mean": score_mean,
         "decision_score_std": score_std,
-        "tn": int(cm[0, 0]),
-        "fp": int(cm[0, 1]),
-        "fn": int(cm[1, 0]),
-        "tp": int(cm[1, 1]),
+        "holdout/default_tn": int(cm_default[0, 0]),
+        "holdout/default_fp": int(cm_default[0, 1]),
+        "holdout/default_fn": int(cm_default[1, 0]),
+        "holdout/default_tp": int(cm_default[1, 1]),
+        "tn": int(cm_tuned[0, 0]),
+        "fp": int(cm_tuned[0, 1]),
+        "fn": int(cm_tuned[1, 0]),
+        "tp": int(cm_tuned[1, 1]),
     }
 )
 
-run.summary["macro_f1"] = metrics["Macro-F1"]
-run.summary["holdout/macro_f1"] = metrics["Macro-F1"]
+run.summary["macro_f1"] = metrics_tuned["Macro-F1"]
+run.summary["holdout/macro_f1"] = metrics_tuned["Macro-F1"]
+run.summary["holdout/default_macro_f1"] = metrics_default["Macro-F1"]
+run.summary["holdout/selected_threshold"] = selected_threshold
 
 wandb.log(
     {
+        "confusion_matrix_default": wandb.plot.confusion_matrix(
+            y_true=y_holdout.tolist(),
+            preds=y_pred_default.tolist(),
+            class_names=["Reject", "Accept"],
+        ),
         "confusion_matrix": wandb.plot.confusion_matrix(
             y_true=y_holdout.tolist(),
-            preds=y_pred.tolist(),
+            preds=y_pred_tuned.tolist(),
             class_names=["Reject", "Accept"],
         ),
         "roc_pr_curves": wandb.Image(fig),
