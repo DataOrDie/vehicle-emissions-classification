@@ -614,3 +614,58 @@ wandb.log({"classification_report": report_table})
 
 print("[SECTION] Finishing W&B run")
 run.finish()
+
+# Quick read on the metrics:
+
+# Best setting is clearly C=0.01 with threshold about 0.06.
+# CV macro-F1 is 0.6473 and holdout Macro-F1 is 0.6439, so the gap is only 
+# 0.0034
+# 0.0034 which is small and healthy.
+# Holdout balanced accuracy 0.6553 and MCC 0.2921 are consistent with real improvement, not just a noisy spike.
+# One useful interpretation:
+
+# Predicted positive rate is 0.7248 while holdout positive base rate is about 
+# 3203
+# /
+# 4153
+# ≈
+# 0.771
+# 3203/4153≈0.771, so the tuned threshold is intentionally a bit more conservative on approvals, which is likely helping Macro-F1 balance.
+# If you want, I can do one more targeted pass to try for another small gain:
+
+# Narrow C sweep around 0.01 (for example 0.003, 0.005, 0.008, 0.01, 0.015, 0.02, 0.03).
+# Finer threshold grid around the selected band (for example 0.03 to 0.09).
+# Keep the exact same W&B key names so your dashboards stay consistent.
+
+
+# our cv/macro_f1 increased slightly. we are going good :) 
+# looks this is our best so far :) 
+# C=0.01 | CV MACRO-F1=0.6473 +/- 0.0134 CV ACC=0.7483 +/- 0.0113 Threshold=0.05999 OOF macro_f1=0.6483
+# C=0.1 | CV MACRO-F1=0.6465 +/- 0.0130 CV ACC=0.7465 +/- 0.0108 Threshold=0.04594 OOF macro_f1=0.6471
+# C=0.3 | CV MACRO-F1=0.6466 +/- 0.0133 CV ACC=0.7466 +/- 0.0110 Threshold=0.04497 OOF macro_f1=0.6469
+# C=1 | CV MACRO-F1=0.6465 +/- 0.0133 CV ACC=0.7466 +/- 0.0111 Threshold=0.04490 OOF macro_f1=0.6472
+# C=3 | CV MACRO-F1=0.6464 +/- 0.0133 CV ACC=0.7464 +/- 0.0112 Threshold=0.04472 OOF macro_f1=0.6471
+# C=10 | CV MACRO-F1=0.6464 +/- 0.0133 CV ACC=0.7464 +/- 0.0112 Threshold=0.04476 OOF macro_f1=0.6471
+# Best C selected by OOF macro_f1: 0.01 (threshold=0.05999, score=0.6483)
+# CV ROC_AUC: 0.7252 +/- 0.0195
+# CV PR_AUC: 0.8853 +/- 0.0124
+# CV F1: 0.8360 +/- 0.0080
+# CV PRECISION: 0.8401 +/- 0.0061
+# CV RECALL: 0.8320 +/- 0.0121
+# CV BALANCED_ACCURACY: 0.6490 +/- 0.0132
+# CV MACRO_F1: 0.6473 +/- 0.0134
+# CV MCC: 0.2949 +/- 0.0269
+# CV ACCURACY: 0.7483 +/- 0.0113
+# [SECTION] Running holdout predictions and metric evaluation
+# Use StandardScaler: False
+# Decision threshold: 0.05999
+# ROC-AUC: 0.7221
+# PR-AUC: 0.8814
+# F1: 0.8205
+# Precision: 0.8468
+# Recall: 0.7958
+# Balanced-Accuracy: 0.6553
+# Macro-F1: 0.6439
+# MCC: 0.2921
+# Accuracy: 0.7315
+# Predicted positive rate: 0.7248

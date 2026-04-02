@@ -19,7 +19,7 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
-from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVC
@@ -161,6 +161,16 @@ reject_class_weight: float = 2.0
 optimize_metric: str = "macro_f1"
 # Options: "balanced_accuracy" | "macro_f1" | "mcc"
 enable_threshold_tuning: bool = True
+enable_grid_search: bool = True
+grid_search_scoring: str = "f1_macro"
+grid_search_n_jobs: int = -1
+
+# Keep this compact to avoid very long runs while still exploring impactful knobs.
+svm_param_grid = {
+    "model__C": [0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0],
+    "model__tol": [1e-5, 1e-4, 1e-3],
+    "model__max_iter": [10000, 20000],
+}
 
 
 def rebalance_training_data(X_train, y_train, strategy: str, random_state: int = 42):
@@ -247,6 +257,10 @@ run = wandb.init(
         "reject_class_weight": reject_class_weight,
         "optimize_metric": optimize_metric,
         "enable_threshold_tuning": enable_threshold_tuning,
+        "enable_grid_search": enable_grid_search,
+        "grid_search_scoring": grid_search_scoring,
+        "grid_search_n_jobs": grid_search_n_jobs,
+        "grid_search_param_grid": str(svm_param_grid),
         "noemp_option": noemp_option,
         "newexist_option": newexist_option,
         "createjob_option": createjob_option,
@@ -285,6 +299,62 @@ svm_pipeline = Pipeline(
     ]
 )
 
+selected_model_params = {
+    "C": 1.0,
+    "tol": 1e-4,
+    "max_iter": 10000,
+}
+
+if enable_grid_search:
+    print("[SECTION] Running GridSearchCV for LinearSVC hyperparameter tuning")
+    if balance_strategy in {"oversample_reject", "undersample_approve"}:
+        print(
+            "Skipping GridSearchCV because per-fold resampling is configured. "
+            "Use balance_strategy=none or class_weight to enable search."
+        )
+        wandb.log({"grid_search/skipped": 1, "grid_search/best_score": np.nan})
+    else:
+        grid_search = GridSearchCV(
+            estimator=svm_pipeline,
+            param_grid=svm_param_grid,
+            scoring=grid_search_scoring,
+            cv=skf,
+            refit=True,
+            n_jobs=grid_search_n_jobs,
+            verbose=1,
+        )
+        grid_search.fit(X_trainval, y_trainval)
+
+        selected_model_params = {
+            "C": float(grid_search.best_params_["model__C"]),
+            "tol": float(grid_search.best_params_["model__tol"]),
+            "max_iter": int(grid_search.best_params_["model__max_iter"]),
+        }
+
+        print(
+            "GridSearch best params: "
+            f"C={selected_model_params['C']}, "
+            f"tol={selected_model_params['tol']}, "
+            f"max_iter={selected_model_params['max_iter']}"
+        )
+        print(f"GridSearch best CV ({grid_search_scoring}): {grid_search.best_score_:.4f}")
+
+        wandb.log(
+            {
+                "grid_search/skipped": 0,
+                "grid_search/best_score": float(grid_search.best_score_),
+                "grid_search/best_C": selected_model_params["C"],
+                "grid_search/best_tol": selected_model_params["tol"],
+                "grid_search/best_max_iter": selected_model_params["max_iter"],
+            }
+        )
+
+svm_pipeline.set_params(
+    model__C=selected_model_params["C"],
+    model__tol=selected_model_params["tol"],
+    model__max_iter=selected_model_params["max_iter"],
+)
+
 # Use StratifiedKFold for real cross-validation on the train/val partition.
 # This gives fold-level and aggregate estimates before touching the holdout set.
 print("[SECTION] Running cross-validation on train/val split")
@@ -313,7 +383,9 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
                 "model",
                 LinearSVC(
                     random_state=42,
-                    max_iter=10000,
+                    C=selected_model_params["C"],
+                    tol=selected_model_params["tol"],
+                    max_iter=selected_model_params["max_iter"],
                     class_weight=class_weight,
                 ),
             ),
