@@ -164,6 +164,8 @@ enable_threshold_tuning: bool = True
 enable_grid_search: bool = True
 grid_search_scoring: str = "f1_macro"
 grid_search_n_jobs: int = -1
+enable_second_stage_c_search: bool = True
+second_stage_c_grid = [0.003, 0.005, 0.008, 0.01, 0.015, 0.02, 0.03]
 
 # Keep this compact to avoid very long runs while still exploring impactful knobs.
 svm_param_grid = {
@@ -258,9 +260,11 @@ run = wandb.init(
         "optimize_metric": optimize_metric,
         "enable_threshold_tuning": enable_threshold_tuning,
         "enable_grid_search": enable_grid_search,
+        "enable_second_stage_c_search": enable_second_stage_c_search,
         "grid_search_scoring": grid_search_scoring,
         "grid_search_n_jobs": grid_search_n_jobs,
         "grid_search_param_grid": str(svm_param_grid),
+        "second_stage_c_grid": str(second_stage_c_grid),
         "noemp_option": noemp_option,
         "newexist_option": newexist_option,
         "createjob_option": createjob_option,
@@ -348,6 +352,44 @@ if enable_grid_search:
                 "grid_search/best_max_iter": selected_model_params["max_iter"],
             }
         )
+
+        if enable_second_stage_c_search:
+            print("[SECTION] Running second-stage narrow C grid search")
+            second_stage_grid = {
+                "model__C": second_stage_c_grid,
+                "model__tol": [selected_model_params["tol"]],
+                "model__max_iter": [selected_model_params["max_iter"]],
+            }
+            second_stage_search = GridSearchCV(
+                estimator=svm_pipeline,
+                param_grid=second_stage_grid,
+                scoring=grid_search_scoring,
+                cv=skf,
+                refit=True,
+                n_jobs=grid_search_n_jobs,
+                verbose=1,
+            )
+            second_stage_search.fit(X_trainval, y_trainval)
+
+            selected_model_params["C"] = float(second_stage_search.best_params_["model__C"])
+
+            print(
+                "Second-stage best params: "
+                f"C={selected_model_params['C']}, "
+                f"tol={selected_model_params['tol']}, "
+                f"max_iter={selected_model_params['max_iter']}"
+            )
+            print(
+                f"Second-stage best CV ({grid_search_scoring}): "
+                f"{second_stage_search.best_score_:.4f}"
+            )
+
+            wandb.log(
+                {
+                    "grid_search_stage2/best_score": float(second_stage_search.best_score_),
+                    "grid_search_stage2/best_C": selected_model_params["C"],
+                }
+            )
 
 svm_pipeline.set_params(
     model__C=selected_model_params["C"],
