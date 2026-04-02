@@ -466,6 +466,7 @@ wandb.log(
         "roc_auc": metrics["ROC-AUC"],
         "pr_auc": metrics["PR-AUC"],
         "f1": metrics["F1"],
+        "macro_f1": metrics["Macro-F1"],
         "precision": metrics["Precision"],
         "recall": metrics["Recall"],
         "accuracy": metrics["Accuracy"],
@@ -478,6 +479,9 @@ wandb.log(
         "tp": int(cm[1, 1]),
     }
 )
+
+run.summary["macro_f1"] = metrics["Macro-F1"]
+run.summary["holdout/macro_f1"] = metrics["Macro-F1"]
 
 wandb.log(
     {
