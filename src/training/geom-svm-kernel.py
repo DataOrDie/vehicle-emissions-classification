@@ -22,7 +22,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import LinearSVC
+from sklearn.svm import SVC
 
 
 # -----------------------------------------------------------------------------
@@ -147,8 +147,7 @@ n_splits = skf.get_n_splits()
 # Class balancing helpers
 # -----------------------------------------------------------------------------
 print("[SECTION] Configuring class balance strategy")
-# use_scaler = True
-use_scaler = False
+use_scaler = True
 
 balance_strategy: str = "class_weight"
 # balance_strategy: str = "oversample_reject"
@@ -230,19 +229,24 @@ def score_threshold(y_true: pd.Series, y_pred: np.ndarray, metric_name: str) -> 
 # Model config and W&B run
 # -----------------------------------------------------------------------------
 print("[SECTION] Initializing model config and W&B run")
-# use_scaler = True
-# # use_scaler = False
 class_weight = {0: reject_class_weight, 1: 1.0} if balance_strategy == "class_weight" else None
+
+# Keep this intentionally small to control kernel SVM training cost.
+c_candidates = [0.5, 1.0, 2.0]
+gamma_candidates = ["scale", 0.01, 0.001]
 
 run = wandb.init(
     project="MS Geometric - SVM",
     config={
-        "model_name": "LinearSVC",
+        "model_name": "SVC_RBF",
+        "kernel": "rbf",
         "random_state": 42,
         "max_iter": 10000,
         "use_scaler": use_scaler,
         "balance_strategy": balance_strategy,
         "reject_class_weight": reject_class_weight,
+        "c_candidates": c_candidates,
+        "gamma_candidates": gamma_candidates,
         "noemp_option": noemp_option,
         "newexist_option": newexist_option,
         "createjob_option": createjob_option,
@@ -266,13 +270,99 @@ run = wandb.init(
 # -----------------------------------------------------------------------------
 # Train and evaluate
 # -----------------------------------------------------------------------------
-print("[SECTION] Training LinearSVC pipeline")
+print("[SECTION] Sweeping RBF kernel hyperparameters (C, gamma)")
+sweep_results = []
+
+for c_value in c_candidates:
+    for gamma_value in gamma_candidates:
+        combo_macro_f1_scores = []
+
+        for train_idx, val_idx in skf.split(X_trainval, y_trainval):
+            X_fold_train = X_trainval.iloc[train_idx]
+            y_fold_train = y_trainval.iloc[train_idx]
+            X_fold_val = X_trainval.iloc[val_idx]
+            y_fold_val = y_trainval.iloc[val_idx]
+
+            if balance_strategy in {"oversample_reject", "undersample_approve"}:
+                X_fold_train, y_fold_train = rebalance_training_data(
+                    X_fold_train,
+                    y_fold_train,
+                    strategy=balance_strategy,
+                    random_state=42,
+                )
+
+            sweep_pipeline = Pipeline(
+                steps=[
+                    ("scaler", StandardScaler() if use_scaler else "passthrough"),
+                    (
+                        "model",
+                        SVC(
+                            kernel="rbf",
+                            C=c_value,
+                            gamma=gamma_value,
+                            random_state=42,
+                            max_iter=10000,
+                            class_weight=class_weight,
+                        ),
+                    ),
+                ]
+            )
+            sweep_pipeline.fit(X_fold_train, y_fold_train)
+
+            y_fold_pred = sweep_pipeline.predict(X_fold_val)
+            combo_macro_f1_scores.append(
+                f1_score(y_fold_val, y_fold_pred, average="macro", zero_division=0)
+            )
+
+        combo_mean_macro_f1 = float(np.mean(combo_macro_f1_scores))
+        sweep_result = {
+            "C": c_value,
+            "gamma": gamma_value,
+            "cv_mean_macro_f1": combo_mean_macro_f1,
+        }
+        sweep_results.append(sweep_result)
+        print(
+            f"Sweep C={c_value}, gamma={gamma_value} | "
+            f"mean macro-F1={combo_mean_macro_f1:.4f}"
+        )
+        wandb.log(
+            {
+                "sweep/C": c_value,
+                "sweep/gamma": str(gamma_value),
+                "sweep/cv_mean_macro_f1": combo_mean_macro_f1,
+            }
+        )
+
+best_sweep = max(sweep_results, key=lambda row: row["cv_mean_macro_f1"])
+best_c = best_sweep["C"]
+best_gamma = best_sweep["gamma"]
+
+print(
+    f"Best kernel params: C={best_c}, gamma={best_gamma} "
+    f"(CV mean macro-F1={best_sweep['cv_mean_macro_f1']:.4f})"
+)
+
+wandb.log(
+    {
+        "best_params/C": best_c,
+        "best_params/gamma": str(best_gamma),
+        "best_params/cv_mean_macro_f1": best_sweep["cv_mean_macro_f1"],
+    }
+)
+run.summary["best_c"] = float(best_c)
+run.summary["best_gamma"] = str(best_gamma)
+run.summary["best_cv_mean_macro_f1"] = float(best_sweep["cv_mean_macro_f1"])
+
+print("[SECTION] Training/evaluating RBF SVC with best kernel params")
 svm_pipeline = Pipeline(
     steps=[
         ("scaler", StandardScaler() if use_scaler else "passthrough"),
         (
             "model",
-            LinearSVC(
+            SVC(
+                kernel="rbf",
+                C=best_c,
+                gamma=best_gamma,
                 random_state=42,
                 max_iter=10000,
                 class_weight=class_weight,
@@ -281,8 +371,7 @@ svm_pipeline = Pipeline(
     ]
 )
 
-# Use StratifiedKFold for real cross-validation on the train/val partition.
-# This gives fold-level and aggregate estimates before touching the holdout set.
+# Use StratifiedKFold for fold-level metrics with the selected hyperparameters.
 print("[SECTION] Running cross-validation on train/val split")
 cv_fold_metrics = []
 
@@ -305,7 +394,10 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
             ("scaler", StandardScaler() if use_scaler else "passthrough"),
             (
                 "model",
-                LinearSVC(
+                SVC(
+                    kernel="rbf",
+                    C=best_c,
+                    gamma=best_gamma,
                     random_state=42,
                     max_iter=10000,
                     class_weight=class_weight,
@@ -518,14 +610,3 @@ wandb.log({"classification_report": report_table})
 
 print("[SECTION] Finishing W&B run")
 run.finish()
-
-# Yes, this is a meaningful shift in the direction you wanted.
-
-# You cut the predicted positive rate from 0.9949 to 0.7532, so the model is no longer approving almost everything. At the same time, ROC-AUC and PR-AUC stayed essentially flat, which is good: you changed the decision behavior without really degrading ranking quality. The tradeoff is exactly what we’d expect: precision went up, recall went down, and F1 dropped because the model is now more conservative.
-
-# What this means in practice is:
-
-# If your goal is to deny more loans, this is better than before.
-# If your goal is to improve raw classification balance, it’s a mixed tradeoff.
-# If you want even more denials, the next lever is usually threshold tuning, not just class weighting.
-# The bigger question is whether your “positive” class is approval. If so, this result says the model is approving fewer cases, which matches your goal. If you want, I can help you do the next step: sweep decision thresholds and pick one that hits a target approval/denial rate while keeping AUC stable.
