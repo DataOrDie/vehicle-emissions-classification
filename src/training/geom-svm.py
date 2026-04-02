@@ -8,11 +8,9 @@ import wandb
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
-    balanced_accuracy_score,
     classification_report,
     confusion_matrix,
     f1_score,
-    matthews_corrcoef,
     precision_recall_curve,
     precision_score,
     recall_score,
@@ -57,10 +55,10 @@ if "df" not in globals():
 # -----------------------------------------------------------------------------
 print("[SECTION] Configuring preprocessing options")
 noemp_option: str = "log"
-newexist_option: str = "A" # only A
-createjob_option: str = "C" 
-retainedjob_option: str = "C" 
-disbursementgross_option: str = "C" 
+newexist_option: str = "B"
+createjob_option: str = "B" # same
+retainedjob_option: str = "B" # same
+disbursementgross_option: str = "B" 
 
 approvaldate_option: str = "A" # only A
 approvalfy_option: str = "A" # only A
@@ -157,11 +155,6 @@ balance_strategy: str = "class_weight"
 #   - "undersample_approve"
 reject_class_weight: float = 2.0
 
-# Optimize decisions for better class balance, not approval volume.
-optimize_metric: str = "balanced_accuracy"
-# Options: "balanced_accuracy" | "macro_f1" | "mcc"
-enable_threshold_tuning: bool = True
-
 
 def rebalance_training_data(X_train, y_train, strategy: str, random_state: int = 42):
     """Return a rebalanced copy of the training split when requested.
@@ -232,8 +225,8 @@ def score_threshold(y_true: pd.Series, y_pred: np.ndarray, metric_name: str) -> 
 # Model config and W&B run
 # -----------------------------------------------------------------------------
 print("[SECTION] Initializing model config and W&B run")
-# use_scaler = True
-use_scaler = False
+use_scaler = True
+# use_scaler = False
 class_weight = {0: reject_class_weight, 1: 1.0} if balance_strategy == "class_weight" else None
 
 run = wandb.init(
@@ -245,8 +238,6 @@ run = wandb.init(
         "use_scaler": use_scaler,
         "balance_strategy": balance_strategy,
         "reject_class_weight": reject_class_weight,
-        "optimize_metric": optimize_metric,
-        "enable_threshold_tuning": enable_threshold_tuning,
         "noemp_option": noemp_option,
         "newexist_option": newexist_option,
         "createjob_option": createjob_option,
@@ -289,8 +280,6 @@ svm_pipeline = Pipeline(
 # This gives fold-level and aggregate estimates before touching the holdout set.
 print("[SECTION] Running cross-validation on train/val split")
 cv_fold_metrics = []
-oof_true = []
-oof_scores = []
 
 for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval), 1):
     X_fold_train = X_trainval.iloc[train_idx]
@@ -323,19 +312,14 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
 
     y_fold_pred = fold_pipeline.predict(X_fold_val)
     y_fold_score = fold_pipeline.decision_function(X_fold_val)
-    oof_true.append(y_fold_val)
-    oof_scores.append(y_fold_score)
 
     fold_metrics = {
         "fold": fold_idx,
         "roc_auc": roc_auc_score(y_fold_val, y_fold_score),
         "pr_auc": average_precision_score(y_fold_val, y_fold_score),
-        "f1": f1_score(y_fold_val, y_fold_pred, zero_division=0),
-        "precision": precision_score(y_fold_val, y_fold_pred, zero_division=0),
-        "recall": recall_score(y_fold_val, y_fold_pred, zero_division=0),
-        "balanced_accuracy": balanced_accuracy_score(y_fold_val, y_fold_pred),
-        "macro_f1": f1_score(y_fold_val, y_fold_pred, average="macro", zero_division=0),
-        "mcc": matthews_corrcoef(y_fold_val, y_fold_pred),
+        "f1": f1_score(y_fold_val, y_fold_pred),
+        "precision": precision_score(y_fold_val, y_fold_pred),
+        "recall": recall_score(y_fold_val, y_fold_pred),
         "accuracy": accuracy_score(y_fold_val, y_fold_pred),
     }
     cv_fold_metrics.append(fold_metrics)
@@ -355,9 +339,6 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
             "cv/f1": fold_metrics["f1"],
             "cv/precision": fold_metrics["precision"],
             "cv/recall": fold_metrics["recall"],
-            "cv/balanced_accuracy": fold_metrics["balanced_accuracy"],
-            "cv/macro_f1": fold_metrics["macro_f1"],
-            "cv/mcc": fold_metrics["mcc"],
             "cv/accuracy": fold_metrics["accuracy"],
         }
     )
@@ -373,28 +354,12 @@ cv_summary = {
     "cv_std_precision": float(np.std([m["precision"] for m in cv_fold_metrics])),
     "cv_mean_recall": float(np.mean([m["recall"] for m in cv_fold_metrics])),
     "cv_std_recall": float(np.std([m["recall"] for m in cv_fold_metrics])),
-    "cv_mean_balanced_accuracy": float(np.mean([m["balanced_accuracy"] for m in cv_fold_metrics])),
-    "cv_std_balanced_accuracy": float(np.std([m["balanced_accuracy"] for m in cv_fold_metrics])),
-    "cv_mean_macro_f1": float(np.mean([m["macro_f1"] for m in cv_fold_metrics])),
-    "cv_std_macro_f1": float(np.std([m["macro_f1"] for m in cv_fold_metrics])),
-    "cv_mean_mcc": float(np.mean([m["mcc"] for m in cv_fold_metrics])),
-    "cv_std_mcc": float(np.std([m["mcc"] for m in cv_fold_metrics])),
     "cv_mean_accuracy": float(np.mean([m["accuracy"] for m in cv_fold_metrics])),
     "cv_std_accuracy": float(np.std([m["accuracy"] for m in cv_fold_metrics])),
 }
 
 print("[SECTION] Cross-validation summary")
-for metric_name in [
-    "roc_auc",
-    "pr_auc",
-    "f1",
-    "precision",
-    "recall",
-    "balanced_accuracy",
-    "macro_f1",
-    "mcc",
-    "accuracy",
-]:
+for metric_name in ["roc_auc", "pr_auc", "f1", "precision", "recall", "accuracy"]:
     print(
         f"CV {metric_name.upper()}: "
         f"{cv_summary[f'cv_mean_{metric_name}']:.4f} +/- "
@@ -403,18 +368,7 @@ for metric_name in [
 
 # Log fold-level table and CV aggregate summary to W&B.
 cv_table = wandb.Table(
-    columns=[
-        "fold",
-        "roc_auc",
-        "pr_auc",
-        "f1",
-        "precision",
-        "recall",
-        "balanced_accuracy",
-        "macro_f1",
-        "mcc",
-        "accuracy",
-    ],
+    columns=["fold", "roc_auc", "pr_auc", "f1", "precision", "recall", "accuracy"],
     data=[
         [
             int(m["fold"]),
@@ -423,43 +377,12 @@ cv_table = wandb.Table(
             float(m["f1"]),
             float(m["precision"]),
             float(m["recall"]),
-            float(m["balanced_accuracy"]),
-            float(m["macro_f1"]),
-            float(m["mcc"]),
             float(m["accuracy"]),
         ]
         for m in cv_fold_metrics
     ],
 )
 wandb.log({"cv/folds_table": cv_table, **cv_summary})
-
-decision_threshold = 0.0
-if enable_threshold_tuning:
-    print(f"[SECTION] Tuning decision threshold for {optimize_metric}")
-    y_oof_true = pd.concat(oof_true).reset_index(drop=True)
-    y_oof_scores = np.concatenate(oof_scores)
-    threshold_grid = np.quantile(y_oof_scores, np.linspace(0.05, 0.95, 121))
-
-    best_threshold = 0.0
-    best_threshold_score = -np.inf
-    for threshold in threshold_grid:
-        y_oof_pred = predict_with_threshold(y_oof_scores, float(threshold))
-        metric_value = score_threshold(y_oof_true, y_oof_pred, optimize_metric)
-        if metric_value > best_threshold_score:
-            best_threshold_score = metric_value
-            best_threshold = float(threshold)
-
-    decision_threshold = best_threshold
-    print(
-        f"Selected threshold: {decision_threshold:.5f} "
-        f"({optimize_metric}={best_threshold_score:.4f} on out-of-fold predictions)"
-    )
-    wandb.log(
-        {
-            "threshold/selected": decision_threshold,
-            "threshold/oof_objective": best_threshold_score,
-        }
-    )
 
 # Refit on the full train/val data after CV, then evaluate once on holdout.
 if balance_strategy in {"oversample_reject", "undersample_approve"}:
@@ -475,18 +398,15 @@ else:
 svm_pipeline.fit(X_trainval_fit, y_trainval_fit)
 
 print("[SECTION] Running holdout predictions and metric evaluation")
+y_pred = svm_pipeline.predict(X_holdout)
 y_score = svm_pipeline.decision_function(X_holdout)
-y_pred = predict_with_threshold(y_score, decision_threshold)
 
 metrics = {
     "ROC-AUC": roc_auc_score(y_holdout, y_score),
     "PR-AUC": average_precision_score(y_holdout, y_score),
-    "F1": f1_score(y_holdout, y_pred, zero_division=0),
-    "Precision": precision_score(y_holdout, y_pred, zero_division=0),
-    "Recall": recall_score(y_holdout, y_pred, zero_division=0),
-    "Balanced-Accuracy": balanced_accuracy_score(y_holdout, y_pred),
-    "Macro-F1": f1_score(y_holdout, y_pred, average="macro", zero_division=0),
-    "MCC": matthews_corrcoef(y_holdout, y_pred),
+    "F1": f1_score(y_holdout, y_pred),
+    "Precision": precision_score(y_holdout, y_pred),
+    "Recall": recall_score(y_holdout, y_pred),
     "Accuracy": accuracy_score(y_holdout, y_pred),
 }
 
@@ -497,7 +417,6 @@ score_mean = float(y_score.mean())
 score_std = float(y_score.std())
 
 print(f"Use StandardScaler: {use_scaler}")
-print(f"Decision threshold: {decision_threshold:.5f}")
 for name, value in metrics.items():
     print(f"{name}: {value:.4f}")
 print(f"Predicted positive rate: {positive_rate:.4f}")
@@ -540,11 +459,7 @@ wandb.log(
         "f1": metrics["F1"],
         "precision": metrics["Precision"],
         "recall": metrics["Recall"],
-        "balanced_accuracy": metrics["Balanced-Accuracy"],
-        "macro_f1": metrics["Macro-F1"],
-        "mcc": metrics["MCC"],
         "accuracy": metrics["Accuracy"],
-        "decision_threshold": decision_threshold,
         "predicted_positive_rate": positive_rate,
         "decision_score_mean": score_mean,
         "decision_score_std": score_std,
@@ -587,3 +502,14 @@ wandb.log({"classification_report": report_table})
 
 print("[SECTION] Finishing W&B run")
 run.finish()
+
+# Yes, this is a meaningful shift in the direction you wanted.
+
+# You cut the predicted positive rate from 0.9949 to 0.7532, so the model is no longer approving almost everything. At the same time, ROC-AUC and PR-AUC stayed essentially flat, which is good: you changed the decision behavior without really degrading ranking quality. The tradeoff is exactly what we’d expect: precision went up, recall went down, and F1 dropped because the model is now more conservative.
+
+# What this means in practice is:
+
+# If your goal is to deny more loans, this is better than before.
+# If your goal is to improve raw classification balance, it’s a mixed tradeoff.
+# If you want even more denials, the next lever is usually threshold tuning, not just class weighting.
+# The bigger question is whether your “positive” class is approval. If so, this result says the model is approving fewer cases, which matches your goal. If you want, I can help you do the next step: sweep decision thresholds and pick one that hits a target approval/denial rate while keeping AUC stable.
