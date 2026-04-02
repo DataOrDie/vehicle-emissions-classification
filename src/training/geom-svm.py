@@ -147,8 +147,8 @@ n_splits = skf.get_n_splits()
 # Class balancing helpers
 # -----------------------------------------------------------------------------
 print("[SECTION] Configuring class balance strategy")
-use_scaler = True
-# use_scaler = False
+# use_scaler = True
+use_scaler = False
 
 # balance_strategy: str = "class_weight"
 # balance_strategy: str = "oversample_reject"
