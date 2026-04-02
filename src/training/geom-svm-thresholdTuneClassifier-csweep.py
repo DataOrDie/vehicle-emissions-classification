@@ -419,34 +419,35 @@ for metric_name in [
 
 # Log fold-level table and CV aggregate summary to W&B.
 cv_table = wandb.Table(
-    columns=[
-        "fold",
-        "roc_auc",
-        "pr_auc",
-        "f1",
-        "precision",
-        "recall",
-        "balanced_accuracy",
-        "macro_f1",
-        "mcc",
-        "accuracy",
-    ],
+    columns=["fold", "roc_auc", "pr_auc", "f1", "macro_f1", "precision", "recall", "accuracy"],
     data=[
         [
             int(m["fold"]),
             float(m["roc_auc"]),
             float(m["pr_auc"]),
             float(m["f1"]),
+            float(m["macro_f1"]),
             float(m["precision"]),
             float(m["recall"]),
-            float(m["balanced_accuracy"]),
-            float(m["macro_f1"]),
-            float(m["mcc"]),
             float(m["accuracy"]),
         ]
         for m in cv_fold_metrics
     ],
 )
+
+for fold_metrics in cv_fold_metrics:
+    wandb.log(
+        {
+            "cv/fold": int(fold_metrics["fold"]),
+            "cv/roc_auc": float(fold_metrics["roc_auc"]),
+            "cv/pr_auc": float(fold_metrics["pr_auc"]),
+            "cv/f1": float(fold_metrics["f1"]),
+            "cv/macro_f1": float(fold_metrics["macro_f1"]),
+            "cv/precision": float(fold_metrics["precision"]),
+            "cv/recall": float(fold_metrics["recall"]),
+            "cv/accuracy": float(fold_metrics["accuracy"]),
+        }
+    )
 
 csweep_table = wandb.Table(
     columns=[
