@@ -166,6 +166,7 @@ grid_search_scoring: str = "f1_macro"
 grid_search_n_jobs: int = -1
 enable_second_stage_c_search: bool = True
 second_stage_c_grid = [0.003, 0.005, 0.008, 0.01, 0.015, 0.02, 0.03]
+grid_search_top_n: int = 10
 
 # Keep this compact to avoid very long runs while still exploring impactful knobs.
 svm_param_grid = {
@@ -240,12 +241,56 @@ def score_threshold(y_true: pd.Series, y_pred: np.ndarray, metric_name: str) -> 
     raise ValueError(f"Unknown optimize_metric: {metric_name}")
 
 
+def log_grid_search_top_n(
+    search_obj: GridSearchCV,
+    stage_name: str,
+    top_n: int,
+) -> None:
+    """Log the top-N ranked GridSearchCV candidates as a W&B table."""
+
+    results_df = pd.DataFrame(search_obj.cv_results_)
+    if results_df.empty:
+        return
+
+    results_df = results_df.sort_values("rank_test_score", ascending=True).head(top_n)
+
+    columns = [
+        "rank",
+        "mean_test_score",
+        "std_test_score",
+        "mean_fit_time",
+        "param_model__C",
+        "param_model__tol",
+        "param_model__max_iter",
+    ]
+
+    available_columns = [c for c in columns if c in results_df.columns]
+    if not available_columns:
+        return
+
+    table_rows = []
+    for _, row in results_df.iterrows():
+        row_values = []
+        for col in available_columns:
+            value = row[col]
+            if isinstance(value, (np.floating, float)):
+                row_values.append(float(value))
+            elif isinstance(value, (np.integer, int)):
+                row_values.append(int(value))
+            else:
+                row_values.append(str(value))
+        table_rows.append(row_values)
+
+    results_table = wandb.Table(columns=available_columns, data=table_rows)
+    wandb.log({f"grid_search/{stage_name}_top_candidates": results_table})
+
+
 # -----------------------------------------------------------------------------
 # Model config and W&B run
 # -----------------------------------------------------------------------------
 print("[SECTION] Initializing model config and W&B run")
-# use_scaler = True
-use_scaler = False
+use_scaler = True
+# use_scaler = False
 class_weight = {0: reject_class_weight, 1: 1.0} if balance_strategy == "class_weight" else None
 
 run = wandb.init(
@@ -265,6 +310,7 @@ run = wandb.init(
         "grid_search_n_jobs": grid_search_n_jobs,
         "grid_search_param_grid": str(svm_param_grid),
         "second_stage_c_grid": str(second_stage_c_grid),
+        "grid_search_top_n": grid_search_top_n,
         "noemp_option": noemp_option,
         "newexist_option": newexist_option,
         "createjob_option": createjob_option,
@@ -352,6 +398,11 @@ if enable_grid_search:
                 "grid_search/best_max_iter": selected_model_params["max_iter"],
             }
         )
+        log_grid_search_top_n(
+            search_obj=grid_search,
+            stage_name="stage1",
+            top_n=grid_search_top_n,
+        )
 
         if enable_second_stage_c_search:
             print("[SECTION] Running second-stage narrow C grid search")
@@ -389,6 +440,11 @@ if enable_grid_search:
                     "grid_search_stage2/best_score": float(second_stage_search.best_score_),
                     "grid_search_stage2/best_C": selected_model_params["C"],
                 }
+            )
+            log_grid_search_top_n(
+                search_obj=second_stage_search,
+                stage_name="stage2",
+                top_n=grid_search_top_n,
             )
 
 svm_pipeline.set_params(
