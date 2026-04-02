@@ -151,7 +151,7 @@ n_splits = skf.get_n_splits()
 # Class balancing helpers
 # -----------------------------------------------------------------------------
 print("[SECTION] Configuring class balance strategy")
-use_scaler = False
+use_scaler = True
 
 balance_strategy: str = "class_weight"
 # balance_strategy: str = "oversample_reject"
@@ -277,13 +277,13 @@ svc_max_iter: int = 50000
 svc_cache_size_mb: int = 1024
 
 # Keep this intentionally small to control kernel SVM training cost.
-c_candidates = [0.5, 1.0, 2.0]
-gamma_candidates = ["scale", 0.01, 0.001]
-degree_candidates = [2, 3, 4]
+c_candidates = [0.5, 1.0]
+gamma_candidates = ["scale", 0.01]
+degree_candidates = [2, 3]
 coef0_candidates = [0.0, 1.0]
 
 optimize_metric: str = "macro_f1"
-threshold_candidates_per_fold: int = 101
+threshold_candidates_per_fold: int = 51
 
 # # Expanded grid now that runtime is acceptable.
 # c_candidates = [0.25, 0.5, 1.0, 2.0, 4.0]
