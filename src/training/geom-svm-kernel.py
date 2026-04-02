@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -30,6 +31,12 @@ from sklearn.svm import SVC
 # -----------------------------------------------------------------------------
 print("[SECTION] W&B authentication")
 wandb.login()
+
+# Start total execution timer
+script_start_time = time.perf_counter()
+
+# Start total execution timer
+script_start_time = time.perf_counter()
 
 
 # -----------------------------------------------------------------------------
@@ -231,6 +238,10 @@ def score_threshold(y_true: pd.Series, y_pred: np.ndarray, metric_name: str) -> 
 print("[SECTION] Initializing model config and W&B run")
 class_weight = {0: reject_class_weight, 1: 1.0} if balance_strategy == "class_weight" else None
 
+# Use a high but bounded cap to avoid very long runs.
+svc_max_iter: int = 50000
+svc_cache_size_mb: int = 1024
+
 # Keep this intentionally small to control kernel SVM training cost.
 c_candidates = [0.5, 1.0, 2.0]
 gamma_candidates = ["scale", 0.01, 0.001]
@@ -241,7 +252,8 @@ run = wandb.init(
         "model_name": "SVC_RBF",
         "kernel": "rbf",
         "random_state": 42,
-        "max_iter": 10000,
+        "max_iter": svc_max_iter,
+        "cache_size_mb": svc_cache_size_mb,
         "use_scaler": use_scaler,
         "balance_strategy": balance_strategy,
         "reject_class_weight": reject_class_weight,
@@ -271,6 +283,7 @@ run = wandb.init(
 # Train and evaluate
 # -----------------------------------------------------------------------------
 print("[SECTION] Sweeping RBF kernel hyperparameters (C, gamma)")
+sweep_start_time = time.perf_counter()
 sweep_results = []
 
 for c_value in c_candidates:
@@ -301,7 +314,8 @@ for c_value in c_candidates:
                             C=c_value,
                             gamma=gamma_value,
                             random_state=42,
-                            max_iter=10000,
+                            max_iter=svc_max_iter,
+                            cache_size=svc_cache_size_mb,
                             class_weight=class_weight,
                         ),
                     ),
@@ -336,11 +350,13 @@ for c_value in c_candidates:
 best_sweep = max(sweep_results, key=lambda row: row["cv_mean_macro_f1"])
 best_c = best_sweep["C"]
 best_gamma = best_sweep["gamma"]
+sweep_elapsed = time.perf_counter() - sweep_start_time
 
 print(
     f"Best kernel params: C={best_c}, gamma={best_gamma} "
     f"(CV mean macro-F1={best_sweep['cv_mean_macro_f1']:.4f})"
 )
+print(f"[TIMING] Sweep completed in {sweep_elapsed:.2f} seconds ({sweep_elapsed/60:.2f} minutes)")
 
 wandb.log(
     {
@@ -364,7 +380,8 @@ svm_pipeline = Pipeline(
                 C=best_c,
                 gamma=best_gamma,
                 random_state=42,
-                max_iter=10000,
+                max_iter=svc_max_iter,
+                cache_size=svc_cache_size_mb,
                 class_weight=class_weight,
             ),
         ),
@@ -373,6 +390,7 @@ svm_pipeline = Pipeline(
 
 # Use StratifiedKFold for fold-level metrics with the selected hyperparameters.
 print("[SECTION] Running cross-validation on train/val split")
+cv_start_time = time.perf_counter()
 cv_fold_metrics = []
 
 for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval), 1):
@@ -399,7 +417,8 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
                     C=best_c,
                     gamma=best_gamma,
                     random_state=42,
-                    max_iter=10000,
+                    max_iter=svc_max_iter,
+                    cache_size=svc_cache_size_mb,
                     class_weight=class_weight,
                 ),
             ),
@@ -460,6 +479,8 @@ cv_summary = {
     "cv_std_accuracy": float(np.std([m["accuracy"] for m in cv_fold_metrics])),
 }
 
+cv_elapsed = time.perf_counter() - cv_start_time
+
 print("[SECTION] Cross-validation summary")
 for metric_name in ["roc_auc", "pr_auc", "f1", "macro_f1", "precision", "recall", "accuracy"]:
     print(
@@ -467,6 +488,7 @@ for metric_name in ["roc_auc", "pr_auc", "f1", "macro_f1", "precision", "recall"
         f"{cv_summary[f'cv_mean_{metric_name}']:.4f} +/- "
         f"{cv_summary[f'cv_std_{metric_name}']:.4f}"
     )
+print(f"[TIMING] CV completed in {cv_elapsed:.2f} seconds ({cv_elapsed/60:.2f} minutes)")
 
 # Log fold-level table and CV aggregate summary to W&B.
 cv_table = wandb.Table(
@@ -549,7 +571,7 @@ axes[1].set_ylabel("Precision")
 axes[1].legend()
 
 plt.tight_layout()
-plt.show()
+# plt.show()
 
 
 # -----------------------------------------------------------------------------
@@ -607,6 +629,9 @@ report_table = wandb.Table(
     data=report_rows,
 )
 wandb.log({"classification_report": report_table})
+
+script_elapsed = time.perf_counter() - script_start_time
+print(f"[TIMING] Total script execution: {script_elapsed:.2f} seconds ({script_elapsed/60:.2f} minutes)")
 
 print("[SECTION] Finishing W&B run")
 run.finish()
