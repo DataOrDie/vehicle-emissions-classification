@@ -63,7 +63,7 @@ newexist_option: str = "A"
 createjob_option: str = "trees"
 retainedjob_option: str = "trees"
 disbursementgross_option: str = "trees"
-balancegross_option: str = "trees"
+balancegross_option: str = "drop"
 
 approvaldate_option: str = "A" # only A
 approvalfy_option: str = "A" # only A
