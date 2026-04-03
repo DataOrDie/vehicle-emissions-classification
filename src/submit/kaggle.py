@@ -57,6 +57,9 @@ feature_names = artifacts["features"]
 if not hasattr(options, "accept_option"):
     options.accept_option = "skip"
 
+# Force row-preserving NewExist preprocessing for submissions.
+options.newexist_option = "A"
+
 print(f"\nModel type: {type(svm_pipeline)}")
 print(f"Number of features: {len(feature_names)}\n")
 
@@ -85,6 +88,16 @@ df_test_processed = preprocess_one_step(df_test, options=options)
 print(f"Processed test dataset shape: {df_test_processed.shape}")
 print(f"Processed features: {df_test_processed.shape[1]}")
 
+# Some preprocessing options (e.g., NewExist option B) can drop rows.
+# Restore original test index so submission always has one prediction per input row.
+if len(df_test_processed) != len(df_test):
+    dropped_count = len(df_test) - len(df_test_processed)
+    print(
+        f"WARNING: Preprocessing changed row count by {dropped_count}. "
+        "Restoring original row index for full-length submission."
+    )
+    df_test_processed = df_test_processed.reindex(df_test.index)
+
 
 # =============================================================================
 # SECTION: Verify feature alignment
@@ -100,21 +113,28 @@ if set(processed_features) != set(feature_names):
         print(f"WARNING: Missing features in test data: {missing_in_test}")
     if extra_in_test:
         print(f"WARNING: Extra features in test data: {extra_in_test}")
-    
-    # Align features
-    df_test_processed = df_test_processed[feature_names]
-    print("Features realigned to match training order")
+
+    # Robust alignment: add missing training columns with 0 and drop extras.
+    df_test_processed = df_test_processed.reindex(columns=feature_names, fill_value=0)
+    print("Features realigned to match training schema (missing -> 0, extras dropped)")
 else:
     # Ensure same order as training
     df_test_processed = df_test_processed[feature_names]
     print("Features match training data perfectly")
+
+# Fill any missing values introduced by row restoration/alignment.
+df_test_processed = df_test_processed.fillna(0)
+
+print("[DEBUG] Final df_test_processed columns:")
+for idx, col in enumerate(df_test_processed.columns.tolist(), start=1):
+    print(f"  {idx:02d}. {col}")
 
 
 # =============================================================================
 # SECTION: Generate predictions
 # =============================================================================
 print("[SECTION] Generating predictions")
-X_test = df_test_processed[feature_names].values
+X_test = df_test_processed
 print(f"Input shape for model: {X_test.shape}")
 
 # Get predictions
@@ -138,9 +158,19 @@ print("[SECTION] Creating submission file")
 submissions_dir = project_root / "submissions"
 submissions_dir.mkdir(exist_ok=True)
 
+# Align IDs with the exact rows that survived preprocessing.
+submission_ids = df_test["id"].values
+print(f"Submission IDs: {len(submission_ids)} | Predictions: {len(y_pred)}")
+
+if len(submission_ids) != len(y_pred):
+    raise ValueError(
+        "Submission length mismatch: "
+        f"ids={len(submission_ids)}, preds={len(y_pred)}"
+    )
+
 # Create submission DataFrame
 submission_df = pd.DataFrame({
-    'id': df_test['id'].values,
+    'id': submission_ids,
     'Accept': y_pred.astype(int)
 })
 

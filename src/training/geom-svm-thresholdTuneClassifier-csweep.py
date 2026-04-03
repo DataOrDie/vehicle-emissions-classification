@@ -57,7 +57,7 @@ if "df" not in globals():
 # -----------------------------------------------------------------------------
 print("[SECTION] Configuring preprocessing options")
 noemp_option: str = "C"
-newexist_option: str = "B" # do not change
+newexist_option: str = "A"
 createjob_option: str = "C" # same
 retainedjob_option: str = "B" # same
 disbursementgross_option: str = "C" 
