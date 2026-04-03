@@ -46,6 +46,7 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 from preprocessing.one_step import OneStepOptions, preprocess_one_step
+from submit.save_model import save_model
 
 
 # -----------------------------------------------------------------------------
@@ -823,3 +824,12 @@ print(f"[TIMING] Total script execution: {script_elapsed:.2f} seconds ({script_e
 
 print("[SECTION] Finishing W&B run")
 run.finish()
+
+# Save the trained model and preprocessing options for submission
+saved_paths = save_model(
+    model_pipeline=svm_pipeline,
+    preprocessing_options=options,
+    feature_names=X_trainval.columns.tolist(),
+    project_root=project_root,
+    model_name="geom-svm-kernel-poly",
+)
