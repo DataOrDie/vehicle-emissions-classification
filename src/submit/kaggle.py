@@ -2,10 +2,25 @@
 """
 Kaggle Submission Script for Vehicle Emissions Classification Challenge
 
-This script loads the trained SVM model and generates predictions for the test dataset.
+This script loads a trained model and generates predictions for the test dataset.
+
+Usage:
+    python kaggle.py <model_name>
+    
+Arguments:
+    model_name: Name of the trained model (corresponds to models/{model_name}/ directory)
+    
+Examples:
+    python kaggle.py geom-svm
+    python kaggle.py geom-svm-thresholdTuneClassifier
+    
+Output:
+    - Predictions CSV will be saved to: submissions/submission-{model_name}.csv
+    - The model and preprocessing artifacts must exist in: models/{model_name}/
+    
 Instructions:
-    1. Ensure the model was trained and saved by running: geom-svm.py
-    2. Run this script to generate predictions: python kaggle.py
+    1. Train a model using a training script (e.g., geom-svm.py, geom-svm-thresholdTuneClassifier.py)
+    2. Run this script with the model name: python kaggle.py <model_name>
     3. The submission CSV will be created in the submissions/ directory
     4. Upload the CSV to Kaggle competition manually or use kaggle CLI
 """
@@ -28,6 +43,18 @@ from submit.save_model import load_model
 
 
 # =============================================================================
+# SECTION: Parse command-line arguments
+# =============================================================================
+if len(sys.argv) < 2:
+    print("Usage: python kaggle.py <model_name>")
+    print("Example: python kaggle.py geom-svm-thresholdTuneClassifier")
+    sys.exit(1)
+
+model_name = sys.argv[1]
+print(f"[INFO] Model name: {model_name}")
+
+
+# =============================================================================
 # SECTION: Load test data
 # =============================================================================
 print("[SECTION] Loading test dataset")
@@ -46,7 +73,7 @@ print(f"Sample IDs: {df_test['id'].head().tolist()}")
 # =============================================================================
 artifacts = load_model(
     project_root=project_root,
-    model_name="geom-svm",
+    model_name=model_name,
 )
 
 svm_pipeline = artifacts["model"]
@@ -175,7 +202,7 @@ submission_df = pd.DataFrame({
 })
 
 # Save to CSV
-submission_path = submissions_dir / "submission-geom-svm.csv"
+submission_path = submissions_dir / f"submission-{model_name}.csv"
 submission_df.to_csv(submission_path, index=False)
 
 print(f"Submission file created: {submission_path}")
