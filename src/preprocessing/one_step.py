@@ -78,7 +78,7 @@ def add_tree_features(df_frame: pd.DataFrame) -> pd.DataFrame:
 
 		engineered["jobs_total"] = total_jobs
 		engineered["jobs_gap"] = retained_job - create_job
-		# engineered["jobs_total_log"] = np.log1p(total_jobs)
+		engineered["jobs_total_log"] = np.log1p(total_jobs)
 
 		if "DisbursementGross" in engineered.columns:
 			disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
@@ -86,11 +86,42 @@ def add_tree_features(df_frame: pd.DataFrame) -> pd.DataFrame:
 
 	if {"NoEmp", "CreateJob", "RetainedJob"}.issubset(engineered.columns):
 		noemp = pd.to_numeric(engineered["NoEmp"], errors="coerce").clip(lower=0)
+		retained_job = pd.to_numeric(engineered["RetainedJob"], errors="coerce").clip(lower=0)
 		total_jobs = (
 			pd.to_numeric(engineered["CreateJob"], errors="coerce").clip(lower=0)
-			+ pd.to_numeric(engineered["RetainedJob"], errors="coerce").clip(lower=0)
+			+ retained_job
 		)
 		engineered["jobs_per_employee"] = total_jobs / noemp.clip(lower=1)
+
+		# Employee-count consistency features for tree splits.
+		employee_positive = noemp > 0
+		ratio_denominator = noemp.where(employee_positive, np.nan)
+		retained_to_emp_ratio = retained_job / ratio_denominator
+
+		engineered["retained_to_emp_ratio"] = retained_to_emp_ratio.fillna(0.0)
+		engineered["retained_gt_noemp"] = (retained_job > noemp).astype(int)
+		engineered["retained_ratio_noemp_zero_or_missing"] = (~employee_positive).astype(int)
+		engineered["retained_ratio_eq_0"] = (
+			employee_positive & (retained_job == 0)
+		).astype(int)
+		engineered["retained_ratio_le_0_5"] = (
+			employee_positive
+			& (retained_to_emp_ratio > 0)
+			& (retained_to_emp_ratio <= 0.5)
+		).astype(int)
+		engineered["retained_ratio_0_5_to_1"] = (
+			employee_positive
+			& (retained_to_emp_ratio > 0.5)
+			& (retained_to_emp_ratio <= 1.0)
+		).astype(int)
+		engineered["retained_ratio_1_to_2"] = (
+			employee_positive
+			& (retained_to_emp_ratio > 1.0)
+			& (retained_to_emp_ratio <= 2.0)
+		).astype(int)
+		engineered["retained_ratio_gt_2"] = (
+			employee_positive & (retained_to_emp_ratio > 2.0)
+		).astype(int)
 
 	if {"IsLocalBank", "DisbursementGross"}.issubset(engineered.columns):
 		is_local_bank = pd.to_numeric(engineered["IsLocalBank"], errors="coerce").fillna(0)
