@@ -113,7 +113,10 @@ print("[SECTION] Running preprocessing")
 df_processed = preprocess_one_step(df, options=options, is_tree_model=True)
 print(f"Rows: {len(df_processed):,}")
 print(f"Features: {df_processed.shape[1]}")
-df_processed.head()
+print("[DEBUG] Full df_processed columns:")
+for idx, col in enumerate(df_processed.columns.tolist(), start=1):
+    print(f"  {idx:03d}. {col}")
+# df_processed.head()
 
 
 # -----------------------------------------------------------------------------

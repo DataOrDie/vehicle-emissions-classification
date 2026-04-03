@@ -92,10 +92,10 @@ def add_tree_features(df_frame: pd.DataFrame) -> pd.DataFrame:
 		)
 		engineered["jobs_per_employee"] = total_jobs / noemp.clip(lower=1)
 
-	if {"IsLocalBank", "DisbursementGross"}.issubset(engineered.columns):
-		is_local_bank = pd.to_numeric(engineered["IsLocalBank"], errors="coerce").fillna(0)
-		disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
-		engineered["local_bank_loan"] = is_local_bank * disbursement_gross
+	# if {"IsLocalBank", "DisbursementGross"}.issubset(engineered.columns):
+	# 	is_local_bank = pd.to_numeric(engineered["IsLocalBank"], errors="coerce").fillna(0)
+	# 	disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
+	# 	engineered["local_bank_loan"] = is_local_bank * disbursement_gross
 
 	if {"approvalyear_normalized", "approvalmonth_normalized"}.issubset(engineered.columns):
 		engineered["approval_time_index"] = (
