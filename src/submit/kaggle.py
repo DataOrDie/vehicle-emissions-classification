@@ -1,0 +1,164 @@
+#!/usr/bin/env python
+"""
+Kaggle Submission Script for Vehicle Emissions Classification Challenge
+
+This script loads the trained SVM model and generates predictions for the test dataset.
+Instructions:
+    1. Ensure the model was trained and saved by running: geom-svm.py
+    2. Run this script to generate predictions: python kaggle.py
+    3. The submission CSV will be created in the submissions/ directory
+    4. Upload the CSV to Kaggle competition manually or use kaggle CLI
+"""
+
+from pathlib import Path
+import sys
+
+import numpy as np
+import pandas as pd
+
+# Resolve paths from this file so running from any cwd still works
+script_dir = Path(__file__).resolve().parent
+project_root = script_dir.parents[1]
+src_path = project_root / "src"
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
+
+from preprocessing.one_step import preprocess_one_step
+from submit.save_model import load_model
+
+
+# =============================================================================
+# SECTION: Load test data
+# =============================================================================
+print("[SECTION] Loading test dataset")
+test_path = project_root / "data" / "test_nolabel.csv"
+if not test_path.exists():
+    raise FileNotFoundError(f"Test data not found at: {test_path}")
+
+df_test = pd.read_csv(test_path)
+print(f"Test dataset shape: {df_test.shape}")
+print(f"Columns: {df_test.columns.tolist()}")
+print(f"Sample IDs: {df_test['id'].head().tolist()}")
+
+
+# =============================================================================
+# SECTION: Load saved model and preprocessing options
+# =============================================================================
+artifacts = load_model(
+    project_root=project_root,
+    model_name="geom-svm",
+)
+
+svm_pipeline = artifacts["model"]
+options = artifacts["options"]
+feature_names = artifacts["features"]
+
+# Backward compatibility for older saved options artifacts.
+if not hasattr(options, "accept_option"):
+    options.accept_option = "skip"
+
+print(f"\nModel type: {type(svm_pipeline)}")
+print(f"Number of features: {len(feature_names)}\n")
+
+
+# =============================================================================
+# SECTION: Apply preprocessing to test data
+# =============================================================================
+print("[SECTION] Preprocessing test data")
+print(f"Preprocessing options:")
+print(f"  noemp_option: {options.noemp_option}")
+print(f"  noemp_option: {options.noemp_option}")
+print(f"  newexist_option: {options.newexist_option}")
+print(f"  createjob_option: {options.createjob_option}")
+print(f"  retainedjob_option: {options.retainedjob_option}")
+print(f"  approvaldate_option: {options.approvaldate_option}")
+print(f"  approvalfy_option: {options.approvalfy_option}")
+print(f"  franchise_option: {options.franchise_option}")
+print(f"  urbanrural_option: {options.urbanrural_option}")
+print(f"  revlinecr_option: {options.revlinecr_option}")
+print(f"  lowdoc_option: {options.lowdoc_option}")
+print(f"  disbursementgross_option: {options.disbursementgross_option}")
+print(f"  accept_option: {options.accept_option}")
+print(f"  local_state: {options.local_state}")
+
+df_test_processed = preprocess_one_step(df_test, options=options)
+print(f"Processed test dataset shape: {df_test_processed.shape}")
+print(f"Processed features: {df_test_processed.shape[1]}")
+
+
+# =============================================================================
+# SECTION: Verify feature alignment
+# =============================================================================
+print("[SECTION] Verifying feature alignment")
+processed_features = df_test_processed.columns.tolist()
+
+if set(processed_features) != set(feature_names):
+    missing_in_test = set(feature_names) - set(processed_features)
+    extra_in_test = set(processed_features) - set(feature_names)
+    
+    if missing_in_test:
+        print(f"WARNING: Missing features in test data: {missing_in_test}")
+    if extra_in_test:
+        print(f"WARNING: Extra features in test data: {extra_in_test}")
+    
+    # Align features
+    df_test_processed = df_test_processed[feature_names]
+    print("Features realigned to match training order")
+else:
+    # Ensure same order as training
+    df_test_processed = df_test_processed[feature_names]
+    print("Features match training data perfectly")
+
+
+# =============================================================================
+# SECTION: Generate predictions
+# =============================================================================
+print("[SECTION] Generating predictions")
+X_test = df_test_processed[feature_names].values
+print(f"Input shape for model: {X_test.shape}")
+
+# Get predictions
+y_pred = svm_pipeline.predict(X_test)
+print(f"Predictions generated. Shape: {y_pred.shape}")
+print(f"Prediction distribution:")
+unique, counts = np.unique(y_pred, return_counts=True)
+for label, count in zip(unique, counts):
+    pct = 100.0 * count / len(y_pred)
+    print(f"  Class {label}: {count:6d} ({pct:6.2f}%)")
+
+# Get decision function scores for reference
+y_score = svm_pipeline.decision_function(X_test)
+print(f"Decision scores - Mean: {y_score.mean():.4f}, Std: {y_score.std():.4f}")
+
+
+# =============================================================================
+# SECTION: Create submission file
+# =============================================================================
+print("[SECTION] Creating submission file")
+submissions_dir = project_root / "submissions"
+submissions_dir.mkdir(exist_ok=True)
+
+# Create submission DataFrame
+submission_df = pd.DataFrame({
+    'id': df_test['id'].values,
+    'Accept': y_pred.astype(int)
+})
+
+# Save to CSV
+submission_path = submissions_dir / "submission-geom-svm.csv"
+submission_df.to_csv(submission_path, index=False)
+
+print(f"Submission file created: {submission_path}")
+print(f"Submission shape: {submission_df.shape}")
+print(f"\nFirst 10 submissions:")
+print(submission_df.head(10).to_string(index=False))
+
+
+# =============================================================================
+# SECTION: Kaggle submission
+# =============================================================================
+# print("\n" + "=" * 80)
+# print("KAGGLE SUBMISSION")
+# print("=" * 80)
+
+
