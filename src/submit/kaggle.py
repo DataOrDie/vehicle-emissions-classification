@@ -5,14 +5,16 @@ Kaggle Submission Script for Vehicle Emissions Classification Challenge
 This script loads a trained model and generates predictions for the test dataset.
 
 Usage:
-    python kaggle.py <model_name>
+    python kaggle.py <model_name> [--is-tree-model]
     
 Arguments:
     model_name: Name of the trained model (corresponds to models/{model_name}/ directory)
+    --is-tree-model: Apply tree-focused engineered features during preprocessing
     
 Examples:
     python kaggle.py geom-svm
     python kaggle.py geom-svm-thresholdTuneClassifier
+    python kaggle.py bagging-etrees-tree-first --is-tree-model
     
 Output:
     - Predictions CSV will be saved to: submissions/submission-{model_name}.csv
@@ -46,12 +48,14 @@ from submit.save_model import load_model
 # SECTION: Parse command-line arguments
 # =============================================================================
 if len(sys.argv) < 2:
-    print("Usage: python kaggle.py <model_name>")
+    print("Usage: python kaggle.py <model_name> [--is-tree-model]")
     print("Example: python kaggle.py geom-svm-thresholdTuneClassifier")
     sys.exit(1)
 
 model_name = sys.argv[1]
+is_tree_model = "--is-tree-model" in sys.argv[2:]
 print(f"[INFO] Model name: {model_name}")
+print(f"[INFO] is_tree_model: {is_tree_model}")
 
 
 # =============================================================================
@@ -111,7 +115,11 @@ print(f"  disbursementgross_option: {options.disbursementgross_option}")
 print(f"  accept_option: {options.accept_option}")
 print(f"  local_state: {options.local_state}")
 
-df_test_processed = preprocess_one_step(df_test, options=options)
+df_test_processed = preprocess_one_step(
+    df_test,
+    options=options,
+    is_tree_model=is_tree_model,
+)
 print(f"Processed test dataset shape: {df_test_processed.shape}")
 print(f"Processed features: {df_test_processed.shape[1]}")
 

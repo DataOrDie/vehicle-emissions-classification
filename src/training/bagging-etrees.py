@@ -110,7 +110,7 @@ options = OneStepOptions(
 # Preprocess
 # -----------------------------------------------------------------------------
 print("[SECTION] Running preprocessing")
-df_processed = preprocess_one_step(df, options=options)
+df_processed = preprocess_one_step(df, options=options, is_tree_model=True)
 print(f"Rows: {len(df_processed):,}")
 print(f"Features: {df_processed.shape[1]}")
 df_processed.head()
@@ -157,57 +157,6 @@ balance_strategy: str = "class_weight"
 random_state: int = 42
 decision_threshold_target: str = "macro_f1"
 threshold_grid = np.linspace(0.05, 0.95, 181)
-
-
-def add_tree_features(df_frame: pd.DataFrame) -> pd.DataFrame:
-    """Add a small set of tree-friendly interaction features."""
-
-    engineered = df_frame.copy()
-
-    if {"NoEmp", "DisbursementGross"}.issubset(engineered.columns):
-        noemp = pd.to_numeric(engineered["NoEmp"], errors="coerce").clip(lower=0)
-        disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
-        employee_denominator = noemp.clip(lower=1)
-
-        engineered["loan_per_employee"] = disbursement_gross / employee_denominator
-        engineered["loan_per_employee_log"] = np.log1p(
-            (disbursement_gross / employee_denominator).clip(lower=0)
-        )
-
-    if {"CreateJob", "RetainedJob"}.issubset(engineered.columns):
-        create_job = pd.to_numeric(engineered["CreateJob"], errors="coerce").clip(lower=0)
-        retained_job = pd.to_numeric(engineered["RetainedJob"], errors="coerce").clip(lower=0)
-        total_jobs = create_job + retained_job
-
-        engineered["jobs_total"] = total_jobs
-        engineered["jobs_gap"] = retained_job - create_job
-        engineered["jobs_total_log"] = np.log1p(total_jobs)
-
-        if "DisbursementGross" in engineered.columns:
-            disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
-            engineered["loan_per_job"] = disbursement_gross / total_jobs.clip(lower=1)
-
-    if {"NoEmp", "CreateJob", "RetainedJob"}.issubset(engineered.columns):
-        noemp = pd.to_numeric(engineered["NoEmp"], errors="coerce").clip(lower=0)
-        total_jobs = (
-            pd.to_numeric(engineered["CreateJob"], errors="coerce").clip(lower=0)
-            + pd.to_numeric(engineered["RetainedJob"], errors="coerce").clip(lower=0)
-        )
-        engineered["jobs_per_employee"] = total_jobs / noemp.clip(lower=1)
-
-    if {"IsLocalBank", "DisbursementGross"}.issubset(engineered.columns):
-        is_local_bank = pd.to_numeric(engineered["IsLocalBank"], errors="coerce").fillna(0)
-        disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
-        engineered["local_bank_loan"] = is_local_bank * disbursement_gross
-
-    if {"approvalyear_normalized", "approvalmonth_normalized"}.issubset(engineered.columns):
-        engineered["approval_time_index"] = (
-            pd.to_numeric(engineered["approvalyear_normalized"], errors="coerce") * 12.0
-            + pd.to_numeric(engineered["approvalmonth_normalized"], errors="coerce")
-        )
-
-    engineered = engineered.replace([np.inf, -np.inf], np.nan)
-    return engineered
 
 
 def build_tree_pipeline(random_state: int = 42) -> Pipeline:
@@ -291,8 +240,8 @@ run = wandb.init(
 # Train and evaluate
 # -----------------------------------------------------------------------------
 print("[SECTION] Building tree-first feature set")
-X_trainval_features = add_tree_features(X_trainval)
-X_holdout_features = add_tree_features(X_holdout)
+X_trainval_features = X_trainval
+X_holdout_features = X_holdout
 
 print(f"Train/Val feature count after engineering: {X_trainval_features.shape[1]}")
 print(f"Holdout feature count after engineering: {X_holdout_features.shape[1]}")
@@ -585,5 +534,6 @@ if create_kaggle_csv:
     submission_path = kaggle_modulo.generate_submission_csv(
         model_name=tree_model_name,
         project_root=project_root,
+        is_tree_model=True,
     )
     print(f"Kaggle submission generated: {submission_path}")

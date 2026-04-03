@@ -43,6 +43,7 @@ def generate_submission_csv(
     project_root: Path | None = None,
     test_data_path: Path | None = None,
     submissions_dir: Path | None = None,
+    is_tree_model: bool = False,
     verbose: bool = True,
 ) -> Path:
     """Generate a Kaggle submission CSV from a saved model.
@@ -52,6 +53,7 @@ def generate_submission_csv(
         project_root: Repository root. Defaults to this file's repo root.
         test_data_path: Optional explicit test CSV path.
         submissions_dir: Optional explicit submission output directory.
+        is_tree_model: Whether to apply tree-focused engineered features.
         verbose: Whether to print progress/details.
 
     Returns:
@@ -110,7 +112,11 @@ def generate_submission_csv(
         print(f"  accept_option: {options.accept_option}")
         print(f"  local_state: {options.local_state}")
 
-    df_test_processed = preprocess_one_step(df_test, options=options)
+    df_test_processed = preprocess_one_step(
+        df_test,
+        options=options,
+        is_tree_model=is_tree_model,
+    )
     if verbose:
         print(f"Processed test dataset shape: {df_test_processed.shape}")
         print(f"Processed features: {df_test_processed.shape[1]}")
@@ -238,6 +244,12 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Optional output directory for submission CSV",
     )
+    parser.add_argument(
+        "--is-tree-model",
+        dest="is_tree_model",
+        action="store_true",
+        help="Apply tree-focused engineered features in preprocessing",
+    )
     return parser.parse_args()
 
 
@@ -248,6 +260,7 @@ def main() -> None:
         project_root=Path(args.project_root).resolve() if args.project_root else None,
         test_data_path=Path(args.test_data_path).resolve() if args.test_data_path else None,
         submissions_dir=Path(args.submissions_dir).resolve() if args.submissions_dir else None,
+        is_tree_model=args.is_tree_model,
         verbose=True,
     )
 

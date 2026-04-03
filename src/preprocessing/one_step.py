@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from preprocessing import LowDoc
@@ -55,9 +56,61 @@ def get_default_options() -> dict[str, Any]:
 	return asdict(OneStepOptions())
 
 
+def add_tree_features(df_frame: pd.DataFrame) -> pd.DataFrame:
+	"""Add tree-focused interaction features used by bagging/tree models."""
+
+	engineered = df_frame.copy()
+
+	if {"NoEmp", "DisbursementGross"}.issubset(engineered.columns):
+		noemp = pd.to_numeric(engineered["NoEmp"], errors="coerce").clip(lower=0)
+		disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
+		employee_denominator = noemp.clip(lower=1)
+
+		engineered["loan_per_employee"] = disbursement_gross / employee_denominator
+		engineered["loan_per_employee_log"] = np.log1p(
+			(disbursement_gross / employee_denominator).clip(lower=0)
+		)
+
+	if {"CreateJob", "RetainedJob"}.issubset(engineered.columns):
+		create_job = pd.to_numeric(engineered["CreateJob"], errors="coerce").clip(lower=0)
+		retained_job = pd.to_numeric(engineered["RetainedJob"], errors="coerce").clip(lower=0)
+		total_jobs = create_job + retained_job
+
+		engineered["jobs_total"] = total_jobs
+		engineered["jobs_gap"] = retained_job - create_job
+		engineered["jobs_total_log"] = np.log1p(total_jobs)
+
+		if "DisbursementGross" in engineered.columns:
+			disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
+			engineered["loan_per_job"] = disbursement_gross / total_jobs.clip(lower=1)
+
+	if {"NoEmp", "CreateJob", "RetainedJob"}.issubset(engineered.columns):
+		noemp = pd.to_numeric(engineered["NoEmp"], errors="coerce").clip(lower=0)
+		total_jobs = (
+			pd.to_numeric(engineered["CreateJob"], errors="coerce").clip(lower=0)
+			+ pd.to_numeric(engineered["RetainedJob"], errors="coerce").clip(lower=0)
+		)
+		engineered["jobs_per_employee"] = total_jobs / noemp.clip(lower=1)
+
+	if {"IsLocalBank", "DisbursementGross"}.issubset(engineered.columns):
+		is_local_bank = pd.to_numeric(engineered["IsLocalBank"], errors="coerce").fillna(0)
+		disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
+		engineered["local_bank_loan"] = is_local_bank * disbursement_gross
+
+	if {"approvalyear_normalized", "approvalmonth_normalized"}.issubset(engineered.columns):
+		engineered["approval_time_index"] = (
+			pd.to_numeric(engineered["approvalyear_normalized"], errors="coerce") * 12.0
+			+ pd.to_numeric(engineered["approvalmonth_normalized"], errors="coerce")
+		)
+
+	engineered = engineered.replace([np.inf, -np.inf], np.nan)
+	return engineered
+
+
 def preprocess_one_step(
 	df: pd.DataFrame,
 	options: OneStepOptions | None = None,
+	is_tree_model: bool = False,
 ) -> pd.DataFrame:
 	"""Run all preprocessing modules in notebook order.
 
@@ -67,6 +120,8 @@ def preprocess_one_step(
 		Input raw dataframe.
 	options : OneStepOptions | None
 		Pipeline options. If None, notebook defaults are used.
+	is_tree_model : bool
+		When True, append tree-focused engineered interaction features.
 	"""
 	opts = options or OneStepOptions()
 
@@ -171,7 +226,10 @@ def preprocess_one_step(
 		source_col="DisbursementGross",
 	)
 
+	if is_tree_model:
+		df_out = add_tree_features(df_out)
+
 	return df_out
 
 
-__all__ = ["OneStepOptions", "get_default_options", "preprocess_one_step"]
+__all__ = ["OneStepOptions", "get_default_options", "preprocess_one_step", "add_tree_features"]
