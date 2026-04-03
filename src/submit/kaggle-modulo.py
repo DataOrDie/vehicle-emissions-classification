@@ -215,8 +215,8 @@ def generate_submission_csv(
     if verbose:
         print(f"Submission file created: {submission_path}")
         print(f"Submission shape: {submission_df.shape}")
-        print("\nFirst 10 submissions:")
-        print(submission_df.head(10).to_string(index=False))
+        # print("\nFirst 10 submissions:")
+        # print(submission_df.head(10).to_string(index=False))
 
     return submission_path
 
@@ -261,7 +261,7 @@ def main() -> None:
         test_data_path=Path(args.test_data_path).resolve() if args.test_data_path else None,
         submissions_dir=Path(args.submissions_dir).resolve() if args.submissions_dir else None,
         is_tree_model=args.is_tree_model,
-        verbose=False,
+        verbose=True,
     )
 
 

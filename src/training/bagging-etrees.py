@@ -63,7 +63,7 @@ newexist_option: str = "A"
 createjob_option: str = "trees"
 retainedjob_option: str = "trees"
 disbursementgross_option: str = "trees"
-balancegross_option: str = "trees"
+balancegross_option: str = "drop"
 
 approvaldate_option: str = "C" # use clean year/month without normalization
 approvalfy_option: str = "B" # keep a numeric time signal for trees
@@ -535,5 +535,6 @@ if create_kaggle_csv:
         model_name=tree_model_name,
         project_root=project_root,
         is_tree_model=True,
+        verbose=False,
     )
     print(f"Kaggle submission generated: {submission_path}")
