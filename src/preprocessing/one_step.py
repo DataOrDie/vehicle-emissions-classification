@@ -45,6 +45,7 @@ class OneStepOptions:
 	revlinecr_option: str = "C"
 	lowdoc_option: str = "C"
 	disbursementgross_option: str = "A"
+	accept_option: str = "skip"
 	local_state: str = "IL"
 
 
@@ -157,6 +158,7 @@ def preprocess_one_step(
 	# 15) Accept
 	df_out = accept.preprocess_accept(
 		df=df_out,
+		option=opts.accept_option,
 		source_col="Accept",
 	)
 

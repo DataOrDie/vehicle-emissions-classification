@@ -23,9 +23,16 @@ def _to_numeric_accept(series: pd.Series) -> pd.Series:
 
 def preprocess_accept(
 	df: pd.DataFrame,
+	option: str = "skip",
 	source_col: str = "Accept",
 ) -> pd.DataFrame:
-	"""Preprocess Accept by converting values to numeric."""
+	"""Preprocess Accept by converting values to numeric.
+
+	When option is "skip", the input dataframe is returned unchanged.
+	"""
+	if option == "skip":
+		return df.copy()
+
 	if source_col not in df.columns:
 		raise KeyError(f"Column '{source_col}' not found in DataFrame")
 

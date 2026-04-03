@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 
+import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -42,6 +43,7 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 from preprocessing.one_step import OneStepOptions, preprocess_one_step
+from submit.save_model import save_model
 
 
 # -----------------------------------------------------------------------------
@@ -68,6 +70,7 @@ franchise_option: str = "binary" # only binary
 urbanrural_option: str = "onehot" # only onehot
 revlinecr_option: str = "C" # only C 
 lowdoc_option: str = "C" # only C
+accept_option: str = "" # not skip
 
 local_state: str = "IL"
 
@@ -518,6 +521,15 @@ wandb.log({"classification_report": report_table})
 
 print("[SECTION] Finishing W&B run")
 run.finish()
+
+# Save the trained model and preprocessing options for submission
+saved_paths = save_model(
+    model_pipeline=svm_pipeline,
+    preprocessing_options=options,
+    feature_names=X_trainval.columns.tolist(),
+    project_root=project_root,
+    model_name="geom-svm",
+)
 
 # Yes, this is a meaningful shift in the direction you wanted.
 
