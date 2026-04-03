@@ -5,6 +5,7 @@ Paths:
 - Option B: standardize values (z-score)
 - Option C: log1p + standardize values (z-score)
 - Option trees: clean numeric values and keep natural units
+- Option drop: remove RetainedJob column from the dataset
 """
 
 from __future__ import annotations
@@ -128,6 +129,19 @@ def preprocess_retainedjob_option_trees(
 	return result
 
 
+def preprocess_retainedjob_option_drop(
+	df: pd.DataFrame,
+	source_col: str = "RetainedJob",
+) -> pd.DataFrame:
+	"""Drop option for RetainedJob (remove the column)."""
+	if source_col not in df.columns:
+		raise KeyError(f"Column '{source_col}' not found in DataFrame")
+
+	result = df.copy()
+	result = result.drop(columns=[source_col])
+	return result
+
+
 def preprocess_retainedjob(
 	df: pd.DataFrame,
 	option: str = DEFAULT_RETAINEDJOB_OPTION,
@@ -141,7 +155,8 @@ def preprocess_retainedjob(
 		Input dataset.
 	option : str
 		"A" for Option A (normalize), "B" for Option B (standardize),
-		"C" for Option C (log1p + standardize), "trees" for natural units.
+		"C" for Option C (log1p + standardize), "trees" for natural units,
+		"drop" to remove RetainedJob from the dataset.
 	source_col : str
 		Column name for RetainedJob.
 	"""
@@ -155,5 +170,7 @@ def preprocess_retainedjob(
 		return preprocess_retainedjob_option_c(df=df, source_col=source_col)
 	if option_upper == "TREES":
 		return preprocess_retainedjob_option_trees(df=df, source_col=source_col)
+	if option_upper == "DROP":
+		return preprocess_retainedjob_option_drop(df=df, source_col=source_col)
 
-	raise ValueError("option must be 'A', 'B', 'C', or 'trees'")
+	raise ValueError("option must be 'A', 'B', 'C', 'trees', or 'drop'")
