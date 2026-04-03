@@ -65,7 +65,7 @@ retainedjob_option: str = "trees"
 disbursementgross_option: str = "trees"
 balancegross_option: str = "trees"
 
-approvaldate_option: str = "A" # only A
+approvaldate_option: str = "C" # use clean year/month without normalization
 approvalfy_option: str = "B" # keep a numeric time signal for trees
 franchise_option: str = "binary" # only binary
 urbanrural_option: str = "onehot" # only onehot
@@ -80,7 +80,7 @@ local_state: str = "IL"
 # newexist_option: "A" | "B"
 # createjob_option: "A" | "B" | "C" | "trees"
 # retainedjob_option: "A" | "B" | "C" | "trees"
-# approvaldate_option: "A" | "B"
+# approvaldate_option: "A" | "B" | "C"
 # approvalfy_option: "A" | "B"
 # franchise_option: "binary" | "raw"
 # urbanrural_option: "onehot" | "text"
@@ -205,7 +205,7 @@ def score_threshold(y_true: pd.Series, y_pred: np.ndarray, metric_name: str) -> 
 # Model config and W&B run
 # -----------------------------------------------------------------------------
 print("[SECTION] Initializing model config and W&B run")
-tree_model_name = "bagging-etrees-tree-first"
+tree_model_name = "bagging-etrees"
 create_kaggle_csv: bool = True
 
 run = wandb.init(

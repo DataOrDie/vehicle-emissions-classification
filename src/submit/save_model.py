@@ -70,16 +70,16 @@ def save_model(
     options_path = model_dir / f"{model_name}-options.joblib"
     features_path = model_dir / f"{model_name}-feature-names.joblib"
 
-    # Save artifacts
-    print(f"Saving {model_name} model artifacts to: {model_dir}")
+    # # Save artifacts
+    # print(f"Saving {model_name} model artifacts to: {model_dir}")
     joblib.dump(model_pipeline, model_path)
-    print(f"  ✓ Model pipeline saved to: {model_path}")
+    # print(f"  ✓ Model pipeline saved to: {model_path}")
 
     joblib.dump(preprocessing_options, options_path)
-    print(f"  ✓ Preprocessing options saved to: {options_path}")
+    # print(f"  ✓ Preprocessing options saved to: {options_path}")
 
     joblib.dump(feature_names, features_path)
-    print(f"  ✓ Feature names ({len(feature_names)} features) saved to: {features_path}")
+    # print(f"  ✓ Feature names ({len(feature_names)} features) saved to: {features_path}")
 
     # Return paths for reference
     return {
@@ -150,17 +150,17 @@ def load_model(
             + f"\nPlease run the training script first to generate these files."
         )
 
-    print("[SECTION] Loading model artifacts")
-    print(f"Loading {model_name} model artifacts from: {model_dir}")
+    # print("[SECTION] Loading model artifacts")
+    # print(f"Loading {model_name} model artifacts from: {model_dir}")
 
     model_pipeline = joblib.load(model_path)
-    print(f"  ✓ Model pipeline loaded")
+    # print(f"  ✓ Model pipeline loaded")
 
     preprocessing_options = joblib.load(options_path)
-    print(f"  ✓ Preprocessing options loaded")
+    # print(f"  ✓ Preprocessing options loaded")
 
     feature_names = joblib.load(features_path)
-    print(f"  ✓ Feature names loaded ({len(feature_names)} features)")
+    # print(f"  ✓ Feature names loaded ({len(feature_names)} features)")
 
     return {
         "model": model_pipeline,

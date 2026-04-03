@@ -261,7 +261,7 @@ def main() -> None:
         test_data_path=Path(args.test_data_path).resolve() if args.test_data_path else None,
         submissions_dir=Path(args.submissions_dir).resolve() if args.submissions_dir else None,
         is_tree_model=args.is_tree_model,
-        verbose=True,
+        verbose=False,
     )
 
 

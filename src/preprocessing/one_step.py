@@ -102,6 +102,11 @@ def add_tree_features(df_frame: pd.DataFrame) -> pd.DataFrame:
 			pd.to_numeric(engineered["approvalyear_normalized"], errors="coerce") * 12.0
 			+ pd.to_numeric(engineered["approvalmonth_normalized"], errors="coerce")
 		)
+	elif {"ApprovalYear", "ApprovalMonth"}.issubset(engineered.columns):
+		engineered["approval_time_index"] = (
+			pd.to_numeric(engineered["ApprovalYear"], errors="coerce") * 12.0
+			+ pd.to_numeric(engineered["ApprovalMonth"], errors="coerce")
+		)
 
 	engineered = engineered.replace([np.inf, -np.inf], np.nan)
 	return engineered
