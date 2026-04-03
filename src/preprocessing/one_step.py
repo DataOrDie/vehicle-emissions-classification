@@ -78,7 +78,7 @@ def add_tree_features(df_frame: pd.DataFrame) -> pd.DataFrame:
 
 		engineered["jobs_total"] = total_jobs
 		engineered["jobs_gap"] = retained_job - create_job
-		engineered["jobs_total_log"] = np.log1p(total_jobs)
+		# engineered["jobs_total_log"] = np.log1p(total_jobs)
 
 		if "DisbursementGross" in engineered.columns:
 			disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
