@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import importlib.util
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -256,6 +257,7 @@ def score_threshold(y_true: pd.Series, y_pred: np.ndarray, metric_name: str) -> 
 # -----------------------------------------------------------------------------
 print("[SECTION] Initializing model config and W&B run")
 tree_model_name = "bagging-etrees-tree-first"
+create_kaggle_csv: bool = True
 
 run = wandb.init(
     project="MS BAGGING - TREE ENSEMBLE",
@@ -569,3 +571,19 @@ saved_paths = save_model(
     project_root=project_root,
     model_name=tree_model_name,
 )
+
+if create_kaggle_csv:
+    print("[SECTION] Creating Kaggle submission CSV from saved model")
+    kaggle_module_path = project_root / "src" / "submit" / "kaggle-modulo.py"
+    spec = importlib.util.spec_from_file_location("kaggle_modulo", kaggle_module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load Kaggle module from: {kaggle_module_path}")
+
+    kaggle_modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(kaggle_modulo)
+
+    submission_path = kaggle_modulo.generate_submission_csv(
+        model_name=tree_model_name,
+        project_root=project_root,
+    )
+    print(f"Kaggle submission generated: {submission_path}")
