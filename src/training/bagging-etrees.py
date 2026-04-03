@@ -22,8 +22,8 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.svm import LinearSVC
+from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.impute import SimpleImputer
 
 
 # -----------------------------------------------------------------------------
@@ -63,10 +63,10 @@ newexist_option: str = "A"
 createjob_option: str = "trees"
 retainedjob_option: str = "trees"
 disbursementgross_option: str = "trees"
-balancegross_option: str = "drop"
+balancegross_option: str = "trees"
 
 approvaldate_option: str = "A" # only A
-approvalfy_option: str = "A" # only A
+approvalfy_option: str = "B" # keep a numeric time signal for trees
 franchise_option: str = "binary" # only binary
 urbanrural_option: str = "onehot" # only onehot
 revlinecr_option: str = "C" # only C 
@@ -152,66 +152,92 @@ n_splits = skf.get_n_splits()
 # -----------------------------------------------------------------------------
 # Class balancing helpers
 # -----------------------------------------------------------------------------
-print("[SECTION] Configuring class balance strategy")
-# use_scaler = True
-use_scaler = False
-
-balance_strategy: str = "none"
-# balance_strategy: str = "oversample_reject"
-# balance_strategy: str = "undersample_approve"
-# Options:
-#   - "none"
-#   - "class_weight"
-#   - "oversample_reject"
-#   - "undersample_approve"
-reject_class_weight: float = 2.0
+print("[SECTION] Configuring bagging strategy")
+balance_strategy: str = "class_weight"
+random_state: int = 42
+decision_threshold_target: str = "macro_f1"
+threshold_grid = np.linspace(0.05, 0.95, 181)
 
 
-def rebalance_training_data(X_train, y_train, strategy: str, random_state: int = 42):
-    """Return a rebalanced copy of the training split when requested.
+def add_tree_features(df_frame: pd.DataFrame) -> pd.DataFrame:
+    """Add a small set of tree-friendly interaction features."""
 
-    The target uses `Accept`, where 0 means reject. The two resampling modes
-    intentionally bias the training data toward the reject class.
-    """
+    engineered = df_frame.copy()
 
-    if strategy == "none":
-        return X_train, y_train
+    if {"NoEmp", "DisbursementGross"}.issubset(engineered.columns):
+        noemp = pd.to_numeric(engineered["NoEmp"], errors="coerce").clip(lower=0)
+        disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
+        employee_denominator = noemp.clip(lower=1)
 
-    train_frame = X_train.copy()
-    train_frame["Accept"] = y_train.values
-
-    reject_mask = train_frame["Accept"] == 0
-    reject_rows = train_frame[reject_mask]
-    approve_rows = train_frame[~reject_mask]
-
-    if reject_rows.empty or approve_rows.empty:
-        return X_train, y_train
-
-    if strategy == "oversample_reject":
-        # Upsample rejected loans to match approved loans.
-        reject_rows = reject_rows.sample(
-            n=len(approve_rows),
-            replace=True,
-            random_state=random_state,
+        engineered["loan_per_employee"] = disbursement_gross / employee_denominator
+        engineered["loan_per_employee_log"] = np.log1p(
+            (disbursement_gross / employee_denominator).clip(lower=0)
         )
-        balanced = pd.concat([approve_rows, reject_rows], ignore_index=True)
-    elif strategy == "undersample_approve":
-        # Downsample approved loans to match rejected loans.
-        if len(approve_rows) <= len(reject_rows):
-            return X_train, y_train
-        approve_rows = approve_rows.sample(
-            n=len(reject_rows),
-            replace=False,
-            random_state=random_state,
+
+    if {"CreateJob", "RetainedJob"}.issubset(engineered.columns):
+        create_job = pd.to_numeric(engineered["CreateJob"], errors="coerce").clip(lower=0)
+        retained_job = pd.to_numeric(engineered["RetainedJob"], errors="coerce").clip(lower=0)
+        total_jobs = create_job + retained_job
+
+        engineered["jobs_total"] = total_jobs
+        engineered["jobs_gap"] = retained_job - create_job
+        engineered["jobs_total_log"] = np.log1p(total_jobs)
+
+        if "DisbursementGross" in engineered.columns:
+            disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
+            engineered["loan_per_job"] = disbursement_gross / total_jobs.clip(lower=1)
+
+    if {"NoEmp", "CreateJob", "RetainedJob"}.issubset(engineered.columns):
+        noemp = pd.to_numeric(engineered["NoEmp"], errors="coerce").clip(lower=0)
+        total_jobs = (
+            pd.to_numeric(engineered["CreateJob"], errors="coerce").clip(lower=0)
+            + pd.to_numeric(engineered["RetainedJob"], errors="coerce").clip(lower=0)
         )
-        balanced = pd.concat([approve_rows, reject_rows], ignore_index=True)
+        engineered["jobs_per_employee"] = total_jobs / noemp.clip(lower=1)
+
+    if {"IsLocalBank", "DisbursementGross"}.issubset(engineered.columns):
+        is_local_bank = pd.to_numeric(engineered["IsLocalBank"], errors="coerce").fillna(0)
+        disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
+        engineered["local_bank_loan"] = is_local_bank * disbursement_gross
+
+    if {"approvalyear_normalized", "approvalmonth_normalized"}.issubset(engineered.columns):
+        engineered["approval_time_index"] = (
+            pd.to_numeric(engineered["approvalyear_normalized"], errors="coerce") * 12.0
+            + pd.to_numeric(engineered["approvalmonth_normalized"], errors="coerce")
+        )
+
+    engineered = engineered.replace([np.inf, -np.inf], np.nan)
+    return engineered
+
+
+def build_tree_pipeline(random_state: int = 42) -> Pipeline:
+    """Build a robust ExtraTrees pipeline for the bagging strategy."""
+
+    if balance_strategy == "class_weight":
+        class_weight = "balanced_subsample"
     else:
-        raise ValueError(
-            f"Unknown balance_strategy: {strategy}. Use none, class_weight, oversample_reject, or undersample_approve."
-        )
+        class_weight = None
 
-    balanced = balanced.sample(frac=1.0, random_state=random_state).reset_index(drop=True)
-    return balanced.drop(columns=["Accept"]), balanced["Accept"]
+    return Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            (
+                "model",
+                ExtraTreesClassifier(
+                    n_estimators=500,
+                    criterion="gini",
+                    max_depth=None,
+                    min_samples_split=4,
+                    min_samples_leaf=2,
+                    max_features="sqrt",
+                    bootstrap=True,
+                    class_weight=class_weight,
+                    n_jobs=-1,
+                    random_state=random_state,
+                ),
+            ),
+        ]
+    )
 
 
 def predict_with_threshold(scores: np.ndarray, threshold: float) -> np.ndarray:
@@ -236,19 +262,15 @@ def score_threshold(y_true: pd.Series, y_pred: np.ndarray, metric_name: str) -> 
 # Model config and W&B run
 # -----------------------------------------------------------------------------
 print("[SECTION] Initializing model config and W&B run")
-# use_scaler = True
-# # use_scaler = False
-class_weight = {0: reject_class_weight, 1: 1.0} if balance_strategy == "class_weight" else None
+tree_model_name = "bagging-etrees-tree-first"
 
 run = wandb.init(
-    project="MS BAGGING - EXTREES",
+    project="MS BAGGING - TREE ENSEMBLE",
     config={
-        "model_name": "EXTREES_BAGGING",
-        "random_state": 42,
-        "max_iter": 10000,
-        "use_scaler": use_scaler,
+        "model_name": tree_model_name,
+        "random_state": random_state,
         "balance_strategy": balance_strategy,
-        "reject_class_weight": reject_class_weight,
+        "decision_threshold_target": decision_threshold_target,
         "noemp_option": noemp_option,
         "newexist_option": newexist_option,
         "createjob_option": createjob_option,
@@ -260,6 +282,7 @@ run = wandb.init(
         "revlinecr_option": revlinecr_option,
         "lowdoc_option": lowdoc_option,
         "disbursementgross_option": disbursementgross_option,
+        "balancegross_option": balancegross_option,
         "local_state": local_state,
         "cv_n_splits": n_splits,
         "n_train_rows": int(X_trainval.shape[0]),
@@ -272,66 +295,44 @@ run = wandb.init(
 # -----------------------------------------------------------------------------
 # Train and evaluate
 # -----------------------------------------------------------------------------
-print("[SECTION] Training EXTREES_BAGGING pipeline")
-etrees_pipeline = Pipeline(
-    steps=[
-        ("scaler", StandardScaler() if use_scaler else "passthrough"),
-        (
-            "model",
-            LinearSVC(
-                random_state=42,
-                max_iter=10000,
-                class_weight=class_weight,
-            ),
-        ),
-    ]
-)
+print("[SECTION] Building tree-first feature set")
+X_trainval_features = add_tree_features(X_trainval)
+X_holdout_features = add_tree_features(X_holdout)
+
+print(f"Train/Val feature count after engineering: {X_trainval_features.shape[1]}")
+print(f"Holdout feature count after engineering: {X_holdout_features.shape[1]}")
+
+print("[SECTION] Training ExtraTrees bagging pipeline")
+tree_pipeline = build_tree_pipeline(random_state=random_state)
 
 # Use StratifiedKFold for real cross-validation on the train/val partition.
 # This gives fold-level and aggregate estimates before touching the holdout set.
 print("[SECTION] Running cross-validation on train/val split")
 cv_fold_metrics = []
+oof_proba = np.zeros(len(X_trainval_features), dtype=float)
 
-for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval), 1):
-    X_fold_train = X_trainval.iloc[train_idx]
+for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval_features, y_trainval), 1):
+    X_fold_train = X_trainval_features.iloc[train_idx]
     y_fold_train = y_trainval.iloc[train_idx]
-    X_fold_val = X_trainval.iloc[val_idx]
+    X_fold_val = X_trainval_features.iloc[val_idx]
     y_fold_val = y_trainval.iloc[val_idx]
 
-    if balance_strategy in {"oversample_reject", "undersample_approve"}:
-        X_fold_train, y_fold_train = rebalance_training_data(
-            X_fold_train,
-            y_fold_train,
-            strategy=balance_strategy,
-            random_state=42,
-        )
-
-    fold_pipeline = Pipeline(
-        steps=[
-            ("scaler", StandardScaler() if use_scaler else "passthrough"),
-            (
-                "model",
-                LinearSVC(
-                    random_state=42,
-                    max_iter=10000,
-                    class_weight=class_weight,
-                ),
-            ),
-        ]
-    )
+    fold_pipeline = build_tree_pipeline(random_state=random_state)
     fold_pipeline.fit(X_fold_train, y_fold_train)
 
-    y_fold_pred = fold_pipeline.predict(X_fold_val)
-    y_fold_score = fold_pipeline.decision_function(X_fold_val)
+    y_fold_score = fold_pipeline.predict_proba(X_fold_val)[:, 1]
+    oof_proba[val_idx] = y_fold_score
+    y_fold_pred = (y_fold_score >= 0.5).astype(int)
 
     fold_metrics = {
         "fold": fold_idx,
         "roc_auc": roc_auc_score(y_fold_val, y_fold_score),
         "pr_auc": average_precision_score(y_fold_val, y_fold_score),
-        "f1": f1_score(y_fold_val, y_fold_pred),
+        "f1": f1_score(y_fold_val, y_fold_pred, zero_division=0),
         "macro_f1": f1_score(y_fold_val, y_fold_pred, average="macro", zero_division=0),
-        "precision": precision_score(y_fold_val, y_fold_pred),
-        "recall": recall_score(y_fold_val, y_fold_pred),
+        "balanced_accuracy": balanced_accuracy_score(y_fold_val, y_fold_pred),
+        "precision": precision_score(y_fold_val, y_fold_pred, zero_division=0),
+        "recall": recall_score(y_fold_val, y_fold_pred, zero_division=0),
         "accuracy": accuracy_score(y_fold_val, y_fold_pred),
     }
     cv_fold_metrics.append(fold_metrics)
@@ -341,7 +342,8 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
         f"ROC-AUC={fold_metrics['roc_auc']:.4f} "
         f"PR-AUC={fold_metrics['pr_auc']:.4f} "
         f"F1={fold_metrics['f1']:.4f} "
-        f"Macro-F1={fold_metrics['macro_f1']:.4f}"
+        f"Macro-F1={fold_metrics['macro_f1']:.4f} "
+        f"Bal-Acc={fold_metrics['balanced_accuracy']:.4f}"
     )
 
     wandb.log(
@@ -351,11 +353,25 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval
             "cv/pr_auc": fold_metrics["pr_auc"],
             "cv/f1": fold_metrics["f1"],
             "cv/macro_f1": fold_metrics["macro_f1"],
+            "cv/balanced_accuracy": fold_metrics["balanced_accuracy"],
             "cv/precision": fold_metrics["precision"],
             "cv/recall": fold_metrics["recall"],
             "cv/accuracy": fold_metrics["accuracy"],
         }
     )
+
+oof_default_pred = (oof_proba >= 0.5).astype(int)
+best_threshold = 0.5
+best_threshold_score = float("-inf")
+
+for threshold in threshold_grid:
+    threshold_pred = (oof_proba >= threshold).astype(int)
+    threshold_score = score_threshold(y_trainval, threshold_pred, decision_threshold_target)
+    if threshold_score > best_threshold_score:
+        best_threshold_score = threshold_score
+        best_threshold = float(threshold)
+
+oof_tuned_pred = (oof_proba >= best_threshold).astype(int)
 
 cv_summary = {
     "cv_mean_roc_auc": float(np.mean([m["roc_auc"] for m in cv_fold_metrics])),
@@ -366,25 +382,57 @@ cv_summary = {
     "cv_std_f1": float(np.std([m["f1"] for m in cv_fold_metrics])),
     "cv_mean_macro_f1": float(np.mean([m["macro_f1"] for m in cv_fold_metrics])),
     "cv_std_macro_f1": float(np.std([m["macro_f1"] for m in cv_fold_metrics])),
+    "cv_mean_balanced_accuracy": float(np.mean([m["balanced_accuracy"] for m in cv_fold_metrics])),
+    "cv_std_balanced_accuracy": float(np.std([m["balanced_accuracy"] for m in cv_fold_metrics])),
     "cv_mean_precision": float(np.mean([m["precision"] for m in cv_fold_metrics])),
     "cv_std_precision": float(np.std([m["precision"] for m in cv_fold_metrics])),
     "cv_mean_recall": float(np.mean([m["recall"] for m in cv_fold_metrics])),
     "cv_std_recall": float(np.std([m["recall"] for m in cv_fold_metrics])),
     "cv_mean_accuracy": float(np.mean([m["accuracy"] for m in cv_fold_metrics])),
     "cv_std_accuracy": float(np.std([m["accuracy"] for m in cv_fold_metrics])),
+    "oof_roc_auc": float(roc_auc_score(y_trainval, oof_proba)),
+    "oof_pr_auc": float(average_precision_score(y_trainval, oof_proba)),
+    "oof_f1": float(f1_score(y_trainval, oof_tuned_pred, zero_division=0)),
+    "oof_macro_f1": float(f1_score(y_trainval, oof_tuned_pred, average="macro", zero_division=0)),
+    "oof_balanced_accuracy": float(balanced_accuracy_score(y_trainval, oof_tuned_pred)),
+    "oof_precision": float(precision_score(y_trainval, oof_tuned_pred, zero_division=0)),
+    "oof_recall": float(recall_score(y_trainval, oof_tuned_pred, zero_division=0)),
+    "oof_accuracy": float(accuracy_score(y_trainval, oof_tuned_pred)),
+    "decision_threshold": best_threshold,
 }
 
 print("[SECTION] Cross-validation summary")
-for metric_name in ["roc_auc", "pr_auc", "f1", "macro_f1", "precision", "recall", "accuracy"]:
+for metric_name in ["roc_auc", "pr_auc", "f1", "macro_f1", "balanced_accuracy", "precision", "recall", "accuracy"]:
     print(
         f"CV {metric_name.upper()}: "
         f"{cv_summary[f'cv_mean_{metric_name}']:.4f} +/- "
         f"{cv_summary[f'cv_std_{metric_name}']:.4f}"
     )
 
+print(
+    f"OOF threshold search: best_threshold={best_threshold:.3f} "
+    f"best_{decision_threshold_target}={best_threshold_score:.4f}"
+)
+print(
+    f"OOF ROC-AUC={cv_summary['oof_roc_auc']:.4f} "
+    f"OOF PR-AUC={cv_summary['oof_pr_auc']:.4f} "
+    f"OOF Macro-F1={cv_summary['oof_macro_f1']:.4f} "
+    f"OOF Balanced-Accuracy={cv_summary['oof_balanced_accuracy']:.4f}"
+)
+
 # Log fold-level table and CV aggregate summary to W&B.
 cv_table = wandb.Table(
-    columns=["fold", "roc_auc", "pr_auc", "f1", "macro_f1", "precision", "recall", "accuracy"],
+    columns=[
+        "fold",
+        "roc_auc",
+        "pr_auc",
+        "f1",
+        "macro_f1",
+        "balanced_accuracy",
+        "precision",
+        "recall",
+        "accuracy",
+    ],
     data=[
         [
             int(m["fold"]),
@@ -392,6 +440,7 @@ cv_table = wandb.Table(
             float(m["pr_auc"]),
             float(m["f1"]),
             float(m["macro_f1"]),
+            float(m["balanced_accuracy"]),
             float(m["precision"]),
             float(m["recall"]),
             float(m["accuracy"]),
@@ -402,39 +451,31 @@ cv_table = wandb.Table(
 wandb.log({"cv/folds_table": cv_table, **cv_summary})
 
 # Refit on the full train/val data after CV, then evaluate once on holdout.
-if balance_strategy in {"oversample_reject", "undersample_approve"}:
-    X_trainval_fit, y_trainval_fit = rebalance_training_data(
-        X_trainval,
-        y_trainval,
-        strategy=balance_strategy,
-        random_state=42,
-    )
-else:
-    X_trainval_fit, y_trainval_fit = X_trainval, y_trainval
-
-etrees_pipeline.fit(X_trainval_fit, y_trainval_fit)
+tree_pipeline.fit(X_trainval_features, y_trainval)
 
 print("[SECTION] Running holdout predictions and metric evaluation")
-y_pred = etrees_pipeline.predict(X_holdout)
-y_score = etrees_pipeline.decision_function(X_holdout)
+y_score = tree_pipeline.predict_proba(X_holdout_features)[:, 1]
+y_pred = (y_score >= best_threshold).astype(int)
 
 metrics = {
     "ROC-AUC": roc_auc_score(y_holdout, y_score),
     "PR-AUC": average_precision_score(y_holdout, y_score),
-    "F1": f1_score(y_holdout, y_pred),
+    "F1": f1_score(y_holdout, y_pred, zero_division=0),
     "Macro-F1": f1_score(y_holdout, y_pred, average="macro", zero_division=0),
-    "Precision": precision_score(y_holdout, y_pred),
-    "Recall": recall_score(y_holdout, y_pred),
+    "Balanced-Accuracy": balanced_accuracy_score(y_holdout, y_pred),
+    "Precision": precision_score(y_holdout, y_pred, zero_division=0),
+    "Recall": recall_score(y_holdout, y_pred, zero_division=0),
     "Accuracy": accuracy_score(y_holdout, y_pred),
 }
 
 cm = confusion_matrix(y_holdout, y_pred)
-report = classification_report(y_holdout, y_pred, output_dict=True)
+report = classification_report(y_holdout, y_pred, output_dict=True, zero_division=0)
 positive_rate = float((y_pred == 1).mean())
 score_mean = float(y_score.mean())
 score_std = float(y_score.std())
 
-print(f"Use StandardScaler: {use_scaler}")
+print("Use tree-based ensemble: True")
+print(f"Decision threshold: {best_threshold:.3f}")
 for name, value in metrics.items():
     print(f"{name}: {value:.4f}")
 print(f"Predicted positive rate: {positive_rate:.4f}")
@@ -476,12 +517,14 @@ wandb.log(
         "pr_auc": metrics["PR-AUC"],
         "f1": metrics["F1"],
         "macro_f1": metrics["Macro-F1"],
+        "balanced_accuracy": metrics["Balanced-Accuracy"],
         "precision": metrics["Precision"],
         "recall": metrics["Recall"],
         "accuracy": metrics["Accuracy"],
         "predicted_positive_rate": positive_rate,
         "decision_score_mean": score_mean,
         "decision_score_std": score_std,
+        "decision_threshold": best_threshold,
         "tn": int(cm[0, 0]),
         "fp": int(cm[0, 1]),
         "fn": int(cm[1, 0]),
@@ -491,6 +534,7 @@ wandb.log(
 
 run.summary["macro_f1"] = metrics["Macro-F1"]
 run.summary["holdout/macro_f1"] = metrics["Macro-F1"]
+run.summary["decision_threshold"] = best_threshold
 
 wandb.log(
     {
@@ -527,9 +571,9 @@ run.finish()
 
 # Save the trained model and preprocessing options for submission
 saved_paths = save_model(
-    model_pipeline=etrees_pipeline,
+    model_pipeline=tree_pipeline,
     preprocessing_options=options,
-    feature_names=X_trainval.columns.tolist(),
+    feature_names=X_trainval_features.columns.tolist(),
     project_root=project_root,
-    model_name="bagging-etrees",
+    model_name=tree_model_name,
 )
