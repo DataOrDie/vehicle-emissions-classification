@@ -5,10 +5,17 @@ def preprocess_noemp(df, option="raw", source_col="NoEmp"):
     """
     Opciones:
         - raw: dejar NoEmp tal cual caso Bagging
+        - trees: alias de raw (mantener unidades naturales para arboles)
         - log: aplicar log1p
         - binning: categorizar tamaño empresa
         - C: aplicar log1p + estandarizacion z-score
     """
+
+    if source_col not in df.columns:
+        raise KeyError(f"Column '{source_col}' not found in DataFrame")
+
+    noemp_num = pd.to_numeric(df[source_col], errors="coerce")
+    df[source_col] = noemp_num
 
     if option == "log":
         df[source_col + "_Log"] = np.log1p(df[source_col])
@@ -38,7 +45,7 @@ def preprocess_noemp(df, option="raw", source_col="NoEmp"):
         df[source_col + "_Bin"] = df[source_col].apply(categorize)
         df = df.drop([source_col], axis=1, errors='ignore')
 
-    elif option == "raw":
+    elif option in {"raw", "trees", "TREE", "TREES"}:
         pass
 
     else:

@@ -45,6 +45,7 @@ class OneStepOptions:
 	revlinecr_option: str = "C"
 	lowdoc_option: str = "C"
 	disbursementgross_option: str = "A"
+	balancegross_option: str = "drop"
 	accept_option: str = "skip"
 	local_state: str = "IL"
 
@@ -152,6 +153,7 @@ def preprocess_one_step(
 	# 14) BalanceGross
 	df_out = balanceGross.preprocess_balancegross(
 		df=df_out,
+		option=opts.balancegross_option,
 		source_col="BalanceGross",
 	)
 

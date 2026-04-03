@@ -58,11 +58,12 @@ if "df" not in globals():
 # Preprocessing options
 # -----------------------------------------------------------------------------
 print("[SECTION] Configuring preprocessing options")
-noemp_option: str = "C"
+noemp_option: str = "trees"
 newexist_option: str = "A"
-createjob_option: str = "C" # same
-retainedjob_option: str = "B" # same
-disbursementgross_option: str = "C" 
+createjob_option: str = "trees"
+retainedjob_option: str = "trees"
+disbursementgross_option: str = "trees"
+balancegross_option: str = "trees"
 
 approvaldate_option: str = "A" # only A
 approvalfy_option: str = "A" # only A
@@ -75,17 +76,18 @@ accept_option: str = "" # not skip
 local_state: str = "IL"
 
 # Accepted values:
-# noemp_option: "raw" | "log" | "binning" | "C"
+# noemp_option: "raw" | "log" | "binning" | "C" | "trees"
 # newexist_option: "A" | "B"
-# createjob_option: "A" | "B" | "C"
-# retainedjob_option: "A" | "B" | "C"
+# createjob_option: "A" | "B" | "C" | "trees"
+# retainedjob_option: "A" | "B" | "C" | "trees"
 # approvaldate_option: "A" | "B"
 # approvalfy_option: "A" | "B"
 # franchise_option: "binary" | "raw"
 # urbanrural_option: "onehot" | "text"
 # revlinecr_option: "A" | "B" | "C"
 # lowdoc_option: "A" | "B" | "C"
-# disbursementgross_option: "A" | "B" | "C"
+# disbursementgross_option: "A" | "B" | "C" | "trees"
+# balancegross_option: "drop" | "trees"
 
 options = OneStepOptions(
     noemp_option=noemp_option,
@@ -99,6 +101,7 @@ options = OneStepOptions(
     revlinecr_option=revlinecr_option,
     lowdoc_option=lowdoc_option,
     disbursementgross_option=disbursementgross_option,
+    balancegross_option=balancegross_option,
     local_state=local_state,
 )
 
@@ -460,7 +463,7 @@ axes[1].set_ylabel("Precision")
 axes[1].legend()
 
 plt.tight_layout()
-plt.show()
+# plt.show()
 
 
 # -----------------------------------------------------------------------------

@@ -4,6 +4,7 @@ Paths:
 - Option A: normalize values (min-max)
 - Option B: standardize values (z-score)
 - Option C: log1p + standardize values (z-score)
+- Option trees: clean numeric values and keep natural units
 """
 
 from __future__ import annotations
@@ -114,6 +115,19 @@ def preprocess_createjob_option_c(
 	return result
 
 
+def preprocess_createjob_option_trees(
+	df: pd.DataFrame,
+	source_col: str = "CreateJob",
+) -> pd.DataFrame:
+	"""Tree option for CreateJob (clean numeric values, keep natural units)."""
+	if source_col not in df.columns:
+		raise KeyError(f"Column '{source_col}' not found in DataFrame")
+
+	result = df.copy()
+	result[source_col] = _to_numeric_createjob(result[source_col])
+	return result
+
+
 def preprocess_createjob(
 	df: pd.DataFrame,
 	option: str = DEFAULT_CREATEJOB_OPTION,
@@ -127,7 +141,7 @@ def preprocess_createjob(
 		Input dataset.
 	option : str
 		"A" for Option A (normalize), "B" for Option B (standardize),
-		"C" for Option C (log1p + standardize).
+		"C" for Option C (log1p + standardize), "trees" for natural units.
 	source_col : str
 		Column name for CreateJob.
 	"""
@@ -139,5 +153,7 @@ def preprocess_createjob(
 		return preprocess_createjob_option_b(df=df, source_col=source_col)
 	if option_upper == "C":
 		return preprocess_createjob_option_c(df=df, source_col=source_col)
+	if option_upper == "TREES":
+		return preprocess_createjob_option_trees(df=df, source_col=source_col)
 
-	raise ValueError("option must be 'A', 'B', or 'C'")
+	raise ValueError("option must be 'A', 'B', 'C', or 'trees'")

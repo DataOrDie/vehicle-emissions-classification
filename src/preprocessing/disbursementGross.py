@@ -4,6 +4,7 @@ Paths:
 - Option A: normalize values (min-max)
 - Option B: standardize values (z-score)
 - Option C: log1p + standardize values (z-score)
+- Option trees: clean numeric values and keep natural units
 """
 
 from __future__ import annotations
@@ -119,6 +120,20 @@ def preprocess_disbursementgross_option_c(
 	return result
 
 
+def preprocess_disbursementgross_option_trees(
+	df: pd.DataFrame,
+	source_col: str = "DisbursementGross",
+) -> pd.DataFrame:
+	"""Tree option for DisbursementGross (clean numeric values, keep natural units)."""
+	if source_col not in df.columns:
+		raise KeyError(f"Column '{source_col}' not found in DataFrame")
+
+	result = df.copy()
+	disbursementgross_num = _to_numeric_disbursementgross(result[source_col])
+	result[source_col] = disbursementgross_num
+	return result
+
+
 def preprocess_disbursementgross(
 	df: pd.DataFrame,
 	option: str = DEFAULT_DISBURSEMENTGROSS_OPTION,
@@ -133,5 +148,7 @@ def preprocess_disbursementgross(
 		return preprocess_disbursementgross_option_b(df=df, source_col=source_col)
 	if option_upper == "C":
 		return preprocess_disbursementgross_option_c(df=df, source_col=source_col)
+	if option_upper == "TREES":
+		return preprocess_disbursementgross_option_trees(df=df, source_col=source_col)
 
-	raise ValueError("option must be 'A', 'B', or 'C'")
+	raise ValueError("option must be 'A', 'B', 'C', or 'trees'")
