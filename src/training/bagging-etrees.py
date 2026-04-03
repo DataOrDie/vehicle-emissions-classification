@@ -1,7 +1,6 @@
 from pathlib import Path
 import sys
 
-import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -150,7 +149,7 @@ n_splits = skf.get_n_splits()
 
 
 # -----------------------------------------------------------------------------
-# Class balancing helpers
+# Bagging strategy
 # -----------------------------------------------------------------------------
 print("[SECTION] Configuring bagging strategy")
 balance_strategy: str = "class_weight"
@@ -238,12 +237,6 @@ def build_tree_pipeline(random_state: int = 42) -> Pipeline:
             ),
         ]
     )
-
-
-def predict_with_threshold(scores: np.ndarray, threshold: float) -> np.ndarray:
-    """Convert decision scores to class labels using a configurable cutoff."""
-
-    return (scores >= threshold).astype(int)
 
 
 def score_threshold(y_true: pd.Series, y_pred: np.ndarray, metric_name: str) -> float:
@@ -360,7 +353,6 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval_features, y
         }
     )
 
-oof_default_pred = (oof_proba >= 0.5).astype(int)
 best_threshold = 0.5
 best_threshold_score = float("-inf")
 
