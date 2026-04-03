@@ -29,7 +29,7 @@ Su misión será:
 
     Conocimiento del dominio. Analice el dataset proporcionado, entendiendo las variables del mismo, y su significado. Discuta en grupo sus intuiciones sobre qué variables pueden ser buenos predictores del riesgo asociado. Resuman sus conclusiones en el cuaderno (notebook) de Jupyter.
     Análisis exploratorio. Analice el dataset para confirmar (o desestimar) sus hipótesis y discuta sus descubrimientos en el cuaderno.
-    Aprendizaje automático. Desarrolle uno o más modelos de aprendizaje automático para clasificar la categorización de los vehículo respecto a la niebla tóxica. Debe probar al menos: un algoritmo geométrico, un árbol de decisión y el algoritmo secreto recibido por el grupo. Discuta los resultados y valídelos.
+    Aprendizaje automático. Desarrolle uno o más modelos de aprendizaje automático. Debe probar al menos: un algoritmo geométrico, un árbol de decisión y el algoritmo secreto recibido por el grupo. Discuta los resultados y valídelos.
     Concurso. Una vez disponga de un modelo, deberá usar la plataforma Kaggle para probar su modelo con datos, que combinan datos nuevos con los datos existentes. Puede realizar tantos intentos como desee. Razone los resultados en el cuaderno.
 
 La estructura del ejercicio es la siguiente:
@@ -61,3 +61,29 @@ El desarrollo del ejercicio será en Kaggle. Para poder participar, cada alumno 
 Hay que tener en cuenta que, para realizar un envío a la plataforma Kaggle, hay que generar un fichero CSV con las predicciones generadas, y subirlo. Los detalles del formato de este fichero se encuentran en la página del competición.
 
 Enlace de acceso al reto: aquí.
+
+
+FROM KAGGLE: 
+
+CDAW Loan Approval Prediction in Illinois
+
+Introduction
+
+This challenge consists of an automatic learning competition. The task is to apply the techniques learned in class to a competition to obtain the best model. To this end, a dataset of SME enterprises that have applied for a loan is provided, and their mission will be to build a classifier that determines whether the loan should be granted or denied.
+
+In this challenge, the students must assume the role of a bank and formulate the following question: As a bank representative, should I grant a loan to a particular small business (Company X)? Why or why not? The student makes this decision by assessing a loan's risk.
+Evaluation
+
+The evaluation metric for this competition is Macro F1-Score. The F1 score, commonly used in information retrieval, measures accuracy using the statistics precision p and recall r. Precision is the ratio of true positives (tp) to all predicted positives (tp + fp). Recall is the ratio of true positives to all actual positives (tp + fn). The F1 score is given by:
+
+F1 score definition
+
+The F1 metric weights recall and precision equally, and a good retrieval algorithm would maximize both precision and recall simultaneously. Thus, moderately good performance on both will be favored over excellent performance on one and poor performance on the other.
+
+
+training and evaluation: 
+the whole dataset has been broken down into: 
+
+training : use ./data/train.csv
+testing: use ./data/test_nolabel.csv
+challenge evaluation: not revealed, but we know it is a subset of the whole dataset, we need to provide preprocessing for it in kaggle. 
