@@ -56,7 +56,10 @@ def get_default_options() -> dict[str, Any]:
 	return asdict(OneStepOptions())
 
 
-def add_tree_features(df_frame: pd.DataFrame) -> pd.DataFrame:
+def add_tree_features(
+	df_frame: pd.DataFrame,
+	raw_dates: pd.DataFrame | None = None,
+) -> pd.DataFrame:
 	"""Add tree-focused interaction features used by bagging/tree models."""
 
 	engineered = df_frame.copy()
@@ -91,6 +94,60 @@ def add_tree_features(df_frame: pd.DataFrame) -> pd.DataFrame:
 			+ pd.to_numeric(engineered["RetainedJob"], errors="coerce").clip(lower=0)
 		)
 		engineered["jobs_per_employee"] = total_jobs / noemp.clip(lower=1)
+
+	approval_dates: pd.Series | None = None
+	disbursement_dates: pd.Series | None = None
+
+	if "ApprovalDate" in engineered.columns:
+		approval_dates = pd.to_datetime(
+			engineered["ApprovalDate"],
+			format="%d-%b-%y",
+			errors="coerce",
+		)
+	elif raw_dates is not None and "ApprovalDate" in raw_dates.columns:
+		approval_dates = pd.to_datetime(
+			raw_dates["ApprovalDate"],
+			format="%d-%b-%y",
+			errors="coerce",
+		)
+	elif {"ApprovalYear", "ApprovalMonth"}.issubset(engineered.columns):
+		approval_dates = pd.to_datetime(
+			dict(
+				year=pd.to_numeric(engineered["ApprovalYear"], errors="coerce"),
+				month=pd.to_numeric(engineered["ApprovalMonth"], errors="coerce"),
+				day=1,
+			),
+			errors="coerce",
+		)
+
+	if "DisbursementDate" in engineered.columns:
+		disbursement_dates = pd.to_datetime(
+			engineered["DisbursementDate"],
+			format="%d-%b-%y",
+			errors="coerce",
+		)
+	elif raw_dates is not None and "DisbursementDate" in raw_dates.columns:
+		disbursement_dates = pd.to_datetime(
+			raw_dates["DisbursementDate"],
+			format="%d-%b-%y",
+			errors="coerce",
+		)
+
+	if approval_dates is not None:
+		engineered["approval_year"] = approval_dates.dt.year
+		engineered["approval_month"] = approval_dates.dt.month
+
+	if disbursement_dates is not None:
+		engineered["disbursement_year"] = disbursement_dates.dt.year
+		engineered["disbursement_month"] = disbursement_dates.dt.month
+
+	if approval_dates is not None and disbursement_dates is not None:
+		days_delta = (disbursement_dates - approval_dates).dt.days
+		days_delta = days_delta.where(days_delta >= 0)
+		upper_bound = days_delta.quantile(0.99)
+		if pd.notna(upper_bound):
+			days_delta = days_delta.clip(lower=0, upper=upper_bound)
+		engineered["days_approval_to_disbursement"] = days_delta
 
 	# if {"IsLocalBank", "DisbursementGross"}.issubset(engineered.columns):
 	# 	is_local_bank = pd.to_numeric(engineered["IsLocalBank"], errors="coerce").fillna(0)
@@ -131,6 +188,15 @@ def preprocess_one_step(
 	opts = options or OneStepOptions()
 
 	df_out = df.copy()
+	raw_dates = None
+	if is_tree_model:
+		available_date_cols = [
+			col
+			for col in ["ApprovalDate", "DisbursementDate"]
+			if col in df_out.columns
+		]
+		if available_date_cols:
+			raw_dates = df_out[available_date_cols].copy()
 
 	# 1) Base cleanup
 	df_out = base_cleaning.clean_base_columns(df_out, local_state=opts.local_state)
@@ -232,7 +298,7 @@ def preprocess_one_step(
 	)
 
 	if is_tree_model:
-		df_out = add_tree_features(df_out)
+		df_out = add_tree_features(df_out, raw_dates=raw_dates)
 
 	return df_out
 
