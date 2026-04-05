@@ -149,10 +149,10 @@ def add_tree_features(
 			days_delta = days_delta.clip(lower=0, upper=upper_bound)
 		engineered["days_approval_to_disbursement"] = days_delta
 
-	# if {"IsLocalBank", "DisbursementGross"}.issubset(engineered.columns):
-	# 	is_local_bank = pd.to_numeric(engineered["IsLocalBank"], errors="coerce").fillna(0)
-	# 	disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
-	# 	engineered["local_bank_loan"] = is_local_bank * disbursement_gross
+	if {"IsLocalBank", "DisbursementGross"}.issubset(engineered.columns):
+		is_local_bank = pd.to_numeric(engineered["IsLocalBank"], errors="coerce").fillna(0)
+		disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
+		engineered["local_bank_loan"] = is_local_bank * disbursement_gross
 
 	# if {"approvalyear_normalized", "approvalmonth_normalized"}.issubset(engineered.columns):
 	# 	engineered["approval_time_index"] = (
