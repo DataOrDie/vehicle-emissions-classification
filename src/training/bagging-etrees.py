@@ -24,7 +24,9 @@ from sklearn.metrics import (
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.compose import ColumnTransformer, make_column_selector
 from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import OneHotEncoder
 
 
 # -----------------------------------------------------------------------------
@@ -207,9 +209,31 @@ def build_tree_pipeline(random_state: int = 42, tree_params: dict | None = None)
     else:
         class_weight = None
 
+    preprocessor = ColumnTransformer(
+        transformers=[
+            (
+                "num",
+                Pipeline(steps=[("imputer", SimpleImputer(strategy="median"))]),
+                make_column_selector(dtype_include=np.number),
+            ),
+            (
+                "cat",
+                Pipeline(
+                    steps=[
+                        ("imputer", SimpleImputer(strategy="most_frequent")),
+                        ("onehot", OneHotEncoder(handle_unknown="ignore")),
+                    ]
+                ),
+                make_column_selector(dtype_exclude=np.number),
+            ),
+        ],
+        remainder="drop",
+        sparse_threshold=1.0,
+    )
+
     return Pipeline(
         steps=[
-            ("imputer", SimpleImputer(strategy="median")),
+            ("preprocessor", preprocessor),
             (
                 "model",
                 ExtraTreesClassifier(
