@@ -102,7 +102,6 @@ def add_tree_features(
 		disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
 		employee_denominator = noemp.clip(lower=1)
 
-		engineered["loan_per_employee"] = disbursement_gross / employee_denominator
 		engineered["loan_per_employee_log"] = np.log1p(
 			(disbursement_gross / employee_denominator).clip(lower=0)
 		)
