@@ -50,6 +50,16 @@ class OneStepOptions:
 	accept_option: str = "skip"
 	local_state: str = "IL"
 
+	#---- City/Bank options ----#
+	citybank_option: str = "freq_bucket"
+	city_top_k: int = 120
+	bank_top_k: int = 80
+	city_min_count: int | None = None
+	bank_min_count: int | None = None
+	citybank_other_label: str = "OTHER"
+	citybank_suffix: str = "_bucket"
+	citybank_drop_original: bool = False
+	#----- City/Bank options end -----#
 
 def get_default_options() -> dict[str, Any]:
 	"""Return notebook-aligned defaults for all preprocessing steps."""
@@ -59,10 +69,33 @@ def get_default_options() -> dict[str, Any]:
 def add_tree_features(
 	df_frame: pd.DataFrame,
 	raw_dates: pd.DataFrame | None = None,
+	options: OneStepOptions | None = None,
 ) -> pd.DataFrame:
 	"""Add tree-focused interaction features used by bagging/tree models."""
 
 	engineered = df_frame.copy()
+	opts = options or OneStepOptions()
+
+	# Add high-frequency buckets for high-cardinality categorical columns.
+	if {"City", "Bank"}.issubset(engineered.columns):
+		citybank_option = str(opts.citybank_option).upper()
+		if citybank_option == "FREQ_BUCKET":
+			engineered, _ = city_bank.configure_city_bank_frequency_buckets(
+				engineered,
+				city_top_k=opts.city_top_k,
+				bank_top_k=opts.bank_top_k,
+				city_min_count=opts.city_min_count,
+				bank_min_count=opts.bank_min_count,
+				other_label=opts.citybank_other_label,
+				suffix=opts.citybank_suffix,
+				drop_original=opts.citybank_drop_original,
+			)
+		elif citybank_option == "BINARY":
+			engineered = city_bank.get_city_bank_encoder(engineered)
+		elif citybank_option == "SKIP":
+			pass
+		else:
+			raise ValueError("citybank_option must be 'freq_bucket', 'binary', or 'skip'")
 
 	if {"NoEmp", "DisbursementGross"}.issubset(engineered.columns):
 		noemp = pd.to_numeric(engineered["NoEmp"], errors="coerce").clip(lower=0)
@@ -204,8 +237,8 @@ def preprocess_one_step(
 	# 2) NoEmp
 	df_out = noemp.preprocess_noemp(df_out, option=opts.noemp_option, source_col="NoEmp")
 
-	# 3) City/Bank binary encoding
-	df_out = city_bank.get_city_bank_encoder(df_out)
+	# # 3) City/Bank binary encoding
+	# df_out = city_bank.get_city_bank_encoder(df_out)
 
 	# 4) NewExist
 	df_out = newExists.preprocess_newexist(
@@ -298,7 +331,7 @@ def preprocess_one_step(
 	)
 
 	if is_tree_model:
-		df_out = add_tree_features(df_out, raw_dates=raw_dates)
+		df_out = add_tree_features(df_out, raw_dates=raw_dates, options=opts)
 
 	return df_out
 

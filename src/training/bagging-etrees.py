@@ -75,6 +75,16 @@ lowdoc_option: str = "C" # only C
 accept_option: str = "" # not skip
 
 local_state: str = "IL"
+# ----------------------------- City/Bank options ----------------------------#
+citybank_option: str = "freq_bucket"
+city_top_k: int = 120
+bank_top_k: int = 80
+city_min_count: int | None = None
+bank_min_count: int | None = None
+citybank_other_label: str = "OTHER"
+citybank_suffix: str = "_bucket"
+citybank_drop_original: bool = False
+#----------------------------- City/Bank options end -------------------------#
 
 # Accepted values:
 # noemp_option: "raw" | "log" | "binning" | "C" | "trees"
@@ -89,6 +99,9 @@ local_state: str = "IL"
 # lowdoc_option: "A" | "B" | "C"
 # disbursementgross_option: "A" | "B" | "C" | "trees"
 # balancegross_option: "drop" | "trees"
+# citybank_option: "freq_bucket" | "binary" | "skip"
+# city_top_k/bank_top_k: int (used when *_min_count is None)
+# city_min_count/bank_min_count: int | None (overrides top-k when set)
 
 options = OneStepOptions(
     noemp_option=noemp_option,
@@ -104,6 +117,14 @@ options = OneStepOptions(
     disbursementgross_option=disbursementgross_option,
     balancegross_option=balancegross_option,
     local_state=local_state,
+    citybank_option=citybank_option,
+    city_top_k=city_top_k,
+    bank_top_k=bank_top_k,
+    city_min_count=city_min_count,
+    bank_min_count=bank_min_count,
+    citybank_other_label=citybank_other_label,
+    citybank_suffix=citybank_suffix,
+    citybank_drop_original=citybank_drop_original,
 )
 
 
@@ -323,6 +344,14 @@ run = wandb.init(
         "disbursementgross_option": disbursementgross_option,
         "balancegross_option": balancegross_option,
         "local_state": local_state,
+        "citybank_option": citybank_option,
+        "city_top_k": city_top_k,
+        "bank_top_k": bank_top_k,
+        "city_min_count": city_min_count,
+        "bank_min_count": bank_min_count,
+        "citybank_other_label": citybank_other_label,
+        "citybank_suffix": citybank_suffix,
+        "citybank_drop_original": citybank_drop_original,
         "cv_n_splits": n_splits,
         "n_train_rows": int(X_trainval.shape[0]),
         "n_holdout_rows": int(X_holdout.shape[0]),
