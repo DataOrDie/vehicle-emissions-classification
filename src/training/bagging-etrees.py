@@ -67,7 +67,7 @@ disbursementgross_option: str = "trees"
 balancegross_option: str = "drop"
 
 approvaldate_option: str = "C" # use clean year/month without normalization
-approvalfy_option: str = "B" # keep a numeric time signal for trees
+approvalfy_option: str = "A" # drop
 franchise_option: str = "binary" # only binary
 urbanrural_option: str = "onehot" # only onehot
 revlinecr_option: str = "C" # only C 
