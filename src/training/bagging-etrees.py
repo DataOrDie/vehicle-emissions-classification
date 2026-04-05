@@ -67,7 +67,7 @@ disbursementgross_option: str = "trees"
 balancegross_option: str = "drop"
 
 approvaldate_option: str = "C" # use clean year/month without normalization
-approvalfy_option: str = "A" # drop
+approvalfy_option: str = "C" # use clean year without normalization
 franchise_option: str = "binary" # only binary
 urbanrural_option: str = "onehot" # only onehot
 revlinecr_option: str = "C" # only C 
@@ -82,7 +82,7 @@ local_state: str = "IL"
 # createjob_option: "A" | "B" | "C" | "trees"
 # retainedjob_option: "A" | "B" | "C" | "trees"
 # approvaldate_option: "A" | "B" | "C"
-# approvalfy_option: "A" | "B"
+# approvalfy_option: "A" | "B" | "C"
 # franchise_option: "binary" | "raw"
 # urbanrural_option: "onehot" | "text"
 # revlinecr_option: "A" | "B" | "C"
