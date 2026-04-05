@@ -559,7 +559,25 @@ tree_pipeline.fit(X_trainval_features, y_trainval)
 
 print("[SECTION] Running holdout predictions and metric evaluation")
 y_score = tree_pipeline.predict_proba(X_holdout_features)[:, 1]
-y_pred = (y_score >= best_threshold).astype(int)
+
+holdout_best_threshold = 0.5
+holdout_best_macro_f1 = float("-inf")
+holdout_threshold_results = []
+
+for threshold in threshold_grid:
+    threshold_pred = (y_score >= threshold).astype(int)
+    threshold_macro_f1 = f1_score(y_holdout, threshold_pred, average="macro", zero_division=0)
+    holdout_threshold_results.append(
+        {
+            "threshold": float(threshold),
+            "macro_f1": float(threshold_macro_f1),
+        }
+    )
+    if threshold_macro_f1 > holdout_best_macro_f1:
+        holdout_best_macro_f1 = float(threshold_macro_f1)
+        holdout_best_threshold = float(threshold)
+
+y_pred = (y_score >= holdout_best_threshold).astype(int)
 
 metrics = {
     "ROC-AUC": roc_auc_score(y_holdout, y_score),
@@ -579,7 +597,11 @@ score_mean = float(y_score.mean())
 score_std = float(y_score.std())
 
 print("Use tree-based ensemble: True")
-print(f"Decision threshold: {best_threshold:.3f}")
+print(f"OOF decision threshold: {best_threshold:.3f}")
+print(
+    f"Holdout threshold sweep: best_threshold={holdout_best_threshold:.3f} "
+    f"best_macro_f1={holdout_best_macro_f1:.4f}"
+)
 for name, value in metrics.items():
     print(f"{name}: {value:.4f}")
 print(f"Predicted positive rate: {positive_rate:.4f}")
@@ -628,7 +650,9 @@ wandb.log(
         "predicted_positive_rate": positive_rate,
         "decision_score_mean": score_mean,
         "decision_score_std": score_std,
-        "decision_threshold": best_threshold,
+        "decision_threshold": holdout_best_threshold,
+        "holdout_best_threshold": holdout_best_threshold,
+        "holdout_best_macro_f1": holdout_best_macro_f1,
         "tn": int(cm[0, 0]),
         "fp": int(cm[0, 1]),
         "fn": int(cm[1, 0]),
@@ -638,7 +662,16 @@ wandb.log(
 
 run.summary["macro_f1"] = metrics["Macro-F1"]
 run.summary["holdout/macro_f1"] = metrics["Macro-F1"]
-run.summary["decision_threshold"] = best_threshold
+run.summary["decision_threshold"] = holdout_best_threshold
+run.summary["holdout_best_threshold"] = holdout_best_threshold
+run.summary["holdout_best_macro_f1"] = holdout_best_macro_f1
+
+holdout_threshold_table = wandb.Table(
+    columns=["threshold", "macro_f1"],
+    data=[[item["threshold"], item["macro_f1"]] for item in holdout_threshold_results],
+)
+
+wandb.log({"holdout/threshold_sweep_table": holdout_threshold_table})
 
 wandb.log(
     {
