@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import importlib.util
+from itertools import product
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -161,9 +162,24 @@ random_state: int = 42
 decision_threshold_target: str = "macro_f1"
 threshold_grid = np.linspace(0.05, 0.95, 181)
 
+base_tree_params = {
+    "n_estimators": 500,
+    "min_samples_leaf": 2,
+    "max_features": "sqrt",
+}
 
-def build_tree_pipeline(random_state: int = 42) -> Pipeline:
+sweep_grid = {
+    "n_estimators": [300, 500, 700],
+    "min_samples_leaf": [1, 2, 4],
+    "max_features": ["sqrt", "log2", 0.5],
+}
+
+
+def build_tree_pipeline(random_state: int = 42, tree_params: dict | None = None) -> Pipeline:
     """Build a robust ExtraTrees pipeline for the bagging strategy."""
+
+    if tree_params is None:
+        tree_params = base_tree_params
 
     if balance_strategy == "class_weight":
         class_weight = "balanced_subsample"
@@ -176,12 +192,12 @@ def build_tree_pipeline(random_state: int = 42) -> Pipeline:
             (
                 "model",
                 ExtraTreesClassifier(
-                    n_estimators=500,
+                    n_estimators=tree_params["n_estimators"],
                     criterion="gini",
                     max_depth=None,
                     min_samples_split=4,
-                    min_samples_leaf=2,
-                    max_features="sqrt",
+                    min_samples_leaf=tree_params["min_samples_leaf"],
+                    max_features=tree_params["max_features"],
                     bootstrap=True,
                     class_weight=class_weight,
                     n_jobs=-1,
@@ -204,6 +220,76 @@ def score_threshold(y_true: pd.Series, y_pred: np.ndarray, metric_name: str) -> 
     raise ValueError(f"Unknown optimize_metric: {metric_name}")
 
 
+def evaluate_tree_config(tree_params: dict) -> dict:
+    """Run CV + OOF threshold tuning for one hyperparameter candidate."""
+
+    fold_metrics = []
+    oof_scores = np.zeros(len(X_trainval_features), dtype=float)
+
+    for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval_features, y_trainval), 1):
+        X_fold_train = X_trainval_features.iloc[train_idx]
+        y_fold_train = y_trainval.iloc[train_idx]
+        X_fold_val = X_trainval_features.iloc[val_idx]
+        y_fold_val = y_trainval.iloc[val_idx]
+
+        fold_pipeline = build_tree_pipeline(random_state=random_state, tree_params=tree_params)
+        fold_pipeline.fit(X_fold_train, y_fold_train)
+
+        y_fold_score = fold_pipeline.predict_proba(X_fold_val)[:, 1]
+        oof_scores[val_idx] = y_fold_score
+        y_fold_pred = (y_fold_score >= 0.5).astype(int)
+
+        fold_metrics.append(
+            {
+                "fold": fold_idx,
+                "roc_auc": roc_auc_score(y_fold_val, y_fold_score),
+                "pr_auc": average_precision_score(y_fold_val, y_fold_score),
+                "f1": f1_score(y_fold_val, y_fold_pred, zero_division=0),
+                "macro_f1": f1_score(y_fold_val, y_fold_pred, average="macro", zero_division=0),
+                "balanced_accuracy": balanced_accuracy_score(y_fold_val, y_fold_pred),
+                "precision": precision_score(y_fold_val, y_fold_pred, zero_division=0),
+                "recall": recall_score(y_fold_val, y_fold_pred, zero_division=0),
+                "accuracy": accuracy_score(y_fold_val, y_fold_pred),
+            }
+        )
+
+    best_threshold_local = 0.5
+    best_threshold_score_local = float("-inf")
+
+    for threshold in threshold_grid:
+        threshold_pred = (oof_scores >= threshold).astype(int)
+        threshold_score = score_threshold(y_trainval, threshold_pred, decision_threshold_target)
+        if threshold_score > best_threshold_score_local:
+            best_threshold_score_local = threshold_score
+            best_threshold_local = float(threshold)
+
+    oof_tuned_pred = (oof_scores >= best_threshold_local).astype(int)
+
+    return {
+        "params": tree_params,
+        "fold_metrics": fold_metrics,
+        "oof_scores": oof_scores,
+        "best_threshold": best_threshold_local,
+        "best_threshold_score": best_threshold_score_local,
+        "cv_mean_roc_auc": float(np.mean([m["roc_auc"] for m in fold_metrics])),
+        "cv_mean_pr_auc": float(np.mean([m["pr_auc"] for m in fold_metrics])),
+        "cv_mean_f1": float(np.mean([m["f1"] for m in fold_metrics])),
+        "cv_mean_macro_f1": float(np.mean([m["macro_f1"] for m in fold_metrics])),
+        "cv_mean_balanced_accuracy": float(np.mean([m["balanced_accuracy"] for m in fold_metrics])),
+        "cv_mean_precision": float(np.mean([m["precision"] for m in fold_metrics])),
+        "cv_mean_recall": float(np.mean([m["recall"] for m in fold_metrics])),
+        "cv_mean_accuracy": float(np.mean([m["accuracy"] for m in fold_metrics])),
+        "oof_roc_auc": float(roc_auc_score(y_trainval, oof_scores)),
+        "oof_pr_auc": float(average_precision_score(y_trainval, oof_scores)),
+        "oof_f1": float(f1_score(y_trainval, oof_tuned_pred, zero_division=0)),
+        "oof_macro_f1": float(f1_score(y_trainval, oof_tuned_pred, average="macro", zero_division=0)),
+        "oof_balanced_accuracy": float(balanced_accuracy_score(y_trainval, oof_tuned_pred)),
+        "oof_precision": float(precision_score(y_trainval, oof_tuned_pred, zero_division=0)),
+        "oof_recall": float(recall_score(y_trainval, oof_tuned_pred, zero_division=0)),
+        "oof_accuracy": float(accuracy_score(y_trainval, oof_tuned_pred)),
+    }
+
+
 # -----------------------------------------------------------------------------
 # Model config and W&B run
 # -----------------------------------------------------------------------------
@@ -218,6 +304,12 @@ run = wandb.init(
         "random_state": random_state,
         "balance_strategy": balance_strategy,
         "decision_threshold_target": decision_threshold_target,
+        "base_n_estimators": base_tree_params["n_estimators"],
+        "base_min_samples_leaf": base_tree_params["min_samples_leaf"],
+        "base_max_features": base_tree_params["max_features"],
+        "sweep_n_estimators": sweep_grid["n_estimators"],
+        "sweep_min_samples_leaf": sweep_grid["min_samples_leaf"],
+        "sweep_max_features": sweep_grid["max_features"],
         "noemp_option": noemp_option,
         "newexist_option": newexist_option,
         "createjob_option": createjob_option,
@@ -249,41 +341,109 @@ X_holdout_features = X_holdout
 print(f"Train/Val feature count after engineering: {X_trainval_features.shape[1]}")
 print(f"Holdout feature count after engineering: {X_holdout_features.shape[1]}")
 
-print("[SECTION] Training ExtraTrees bagging pipeline")
-tree_pipeline = build_tree_pipeline(random_state=random_state)
-
-# Use StratifiedKFold for real cross-validation on the train/val partition.
-# This gives fold-level and aggregate estimates before touching the holdout set.
-print("[SECTION] Running cross-validation on train/val split")
-cv_fold_metrics = []
-oof_proba = np.zeros(len(X_trainval_features), dtype=float)
-
-for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval_features, y_trainval), 1):
-    X_fold_train = X_trainval_features.iloc[train_idx]
-    y_fold_train = y_trainval.iloc[train_idx]
-    X_fold_val = X_trainval_features.iloc[val_idx]
-    y_fold_val = y_trainval.iloc[val_idx]
-
-    fold_pipeline = build_tree_pipeline(random_state=random_state)
-    fold_pipeline.fit(X_fold_train, y_fold_train)
-
-    y_fold_score = fold_pipeline.predict_proba(X_fold_val)[:, 1]
-    oof_proba[val_idx] = y_fold_score
-    y_fold_pred = (y_fold_score >= 0.5).astype(int)
-
-    fold_metrics = {
-        "fold": fold_idx,
-        "roc_auc": roc_auc_score(y_fold_val, y_fold_score),
-        "pr_auc": average_precision_score(y_fold_val, y_fold_score),
-        "f1": f1_score(y_fold_val, y_fold_pred, zero_division=0),
-        "macro_f1": f1_score(y_fold_val, y_fold_pred, average="macro", zero_division=0),
-        "balanced_accuracy": balanced_accuracy_score(y_fold_val, y_fold_pred),
-        "precision": precision_score(y_fold_val, y_fold_pred, zero_division=0),
-        "recall": recall_score(y_fold_val, y_fold_pred, zero_division=0),
-        "accuracy": accuracy_score(y_fold_val, y_fold_pred),
+print("[SECTION] Running hyperparameter sweep around current config")
+sweep_candidates = [
+    {
+        "n_estimators": n_estimators,
+        "min_samples_leaf": min_samples_leaf,
+        "max_features": max_features,
     }
-    cv_fold_metrics.append(fold_metrics)
+    for n_estimators, min_samples_leaf, max_features in product(
+        sweep_grid["n_estimators"],
+        sweep_grid["min_samples_leaf"],
+        sweep_grid["max_features"],
+    )
+]
 
+sweep_results = []
+for candidate_idx, candidate_params in enumerate(sweep_candidates, start=1):
+    result = evaluate_tree_config(candidate_params)
+    sweep_results.append(result)
+
+    print(
+        f"Sweep {candidate_idx:02d}/{len(sweep_candidates)} | "
+        f"n_estimators={candidate_params['n_estimators']} "
+        f"min_samples_leaf={candidate_params['min_samples_leaf']} "
+        f"max_features={candidate_params['max_features']} | "
+        f"OOF Macro-F1={result['oof_macro_f1']:.4f} "
+        f"BestThreshold={result['best_threshold']:.3f}"
+    )
+
+sweep_results_sorted = sorted(
+    sweep_results,
+    key=lambda item: item[f"oof_{decision_threshold_target}"],
+    reverse=True,
+)
+best_sweep_result = sweep_results_sorted[0]
+best_tree_params = best_sweep_result["params"]
+
+print("[SECTION] Best hyperparameter combination selected")
+print(
+    f"n_estimators={best_tree_params['n_estimators']}, "
+    f"min_samples_leaf={best_tree_params['min_samples_leaf']}, "
+    f"max_features={best_tree_params['max_features']}"
+)
+
+sweep_table = wandb.Table(
+    columns=[
+        "n_estimators",
+        "min_samples_leaf",
+        "max_features",
+        "cv_mean_roc_auc",
+        "cv_mean_pr_auc",
+        "cv_mean_f1",
+        "cv_mean_macro_f1",
+        "cv_mean_balanced_accuracy",
+        "oof_roc_auc",
+        "oof_pr_auc",
+        "oof_f1",
+        "oof_macro_f1",
+        "oof_balanced_accuracy",
+        "best_threshold",
+        "best_threshold_score",
+    ],
+    data=[
+        [
+            int(item["params"]["n_estimators"]),
+            int(item["params"]["min_samples_leaf"]),
+            str(item["params"]["max_features"]),
+            float(item["cv_mean_roc_auc"]),
+            float(item["cv_mean_pr_auc"]),
+            float(item["cv_mean_f1"]),
+            float(item["cv_mean_macro_f1"]),
+            float(item["cv_mean_balanced_accuracy"]),
+            float(item["oof_roc_auc"]),
+            float(item["oof_pr_auc"]),
+            float(item["oof_f1"]),
+            float(item["oof_macro_f1"]),
+            float(item["oof_balanced_accuracy"]),
+            float(item["best_threshold"]),
+            float(item["best_threshold_score"]),
+        ]
+        for item in sweep_results_sorted
+    ],
+)
+
+wandb.log(
+    {
+        "sweep/results_table": sweep_table,
+        "sweep/best_n_estimators": int(best_tree_params["n_estimators"]),
+        "sweep/best_min_samples_leaf": int(best_tree_params["min_samples_leaf"]),
+        "sweep/best_max_features": str(best_tree_params["max_features"]),
+        "sweep/best_oof_macro_f1": float(best_sweep_result["oof_macro_f1"]),
+        "sweep/best_oof_balanced_accuracy": float(best_sweep_result["oof_balanced_accuracy"]),
+    }
+)
+
+print("[SECTION] Running cross-validation on train/val split with selected params")
+cv_fold_metrics = best_sweep_result["fold_metrics"]
+oof_proba = best_sweep_result["oof_scores"]
+best_threshold = best_sweep_result["best_threshold"]
+best_threshold_score = best_sweep_result["best_threshold_score"]
+oof_tuned_pred = (oof_proba >= best_threshold).astype(int)
+
+for fold_metrics in cv_fold_metrics:
+    fold_idx = fold_metrics["fold"]
     print(
         f"Fold {fold_idx} | "
         f"ROC-AUC={fold_metrics['roc_auc']:.4f} "
@@ -306,18 +466,6 @@ for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval_features, y
             "cv/accuracy": fold_metrics["accuracy"],
         }
     )
-
-best_threshold = 0.5
-best_threshold_score = float("-inf")
-
-for threshold in threshold_grid:
-    threshold_pred = (oof_proba >= threshold).astype(int)
-    threshold_score = score_threshold(y_trainval, threshold_pred, decision_threshold_target)
-    if threshold_score > best_threshold_score:
-        best_threshold_score = threshold_score
-        best_threshold = float(threshold)
-
-oof_tuned_pred = (oof_proba >= best_threshold).astype(int)
 
 cv_summary = {
     "cv_mean_roc_auc": float(np.mean([m["roc_auc"] for m in cv_fold_metrics])),
@@ -394,9 +542,19 @@ cv_table = wandb.Table(
         for m in cv_fold_metrics
     ],
 )
-wandb.log({"cv/folds_table": cv_table, **cv_summary})
+wandb.log(
+    {
+        "cv/folds_table": cv_table,
+        "selected/n_estimators": int(best_tree_params["n_estimators"]),
+        "selected/min_samples_leaf": int(best_tree_params["min_samples_leaf"]),
+        "selected/max_features": str(best_tree_params["max_features"]),
+        **cv_summary,
+    }
+)
 
 # Refit on the full train/val data after CV, then evaluate once on holdout.
+print("[SECTION] Training ExtraTrees bagging pipeline with selected params")
+tree_pipeline = build_tree_pipeline(random_state=random_state, tree_params=best_tree_params)
 tree_pipeline.fit(X_trainval_features, y_trainval)
 
 print("[SECTION] Running holdout predictions and metric evaluation")
