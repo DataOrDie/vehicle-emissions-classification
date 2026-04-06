@@ -19,7 +19,7 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import ParameterSampler, StratifiedKFold, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
@@ -118,14 +118,14 @@ print(f"Features: {df_processed.shape[1]}")
 
 
 # -----------------------------------------------------------------------------
-# Train/test split
+# Split strategy
 # -----------------------------------------------------------------------------
-print("[SECTION] Building train/holdout split")
+print("[SECTION] Building train/holdout split strategy")
 target_col = "Accept"
 X = df_processed.drop(columns=[target_col])
 y = df_processed[target_col]
 
-X_train, X_holdout, y_train, y_holdout = train_test_split(
+X_trainval, X_holdout, y_trainval, y_holdout = train_test_split(
     X,
     y,
     test_size=0.2,
@@ -133,8 +133,14 @@ X_train, X_holdout, y_train, y_holdout = train_test_split(
     stratify=y,
 )
 
-print(f"Train set size: {X_train.shape[0]}")
+print(f"Train/Val set size: {X_trainval.shape[0]}")
 print(f"Holdout set size: {X_holdout.shape[0]}")
+print(f"Train/Val target distribution:\n{y_trainval.value_counts()}\n")
+print(f"Holdout target distribution:\n{y_holdout.value_counts()}\n")
+
+skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+n_splits = skf.get_n_splits()
+print(f"StratifiedKFold splits: {n_splits}")
 
 
 # -----------------------------------------------------------------------------
@@ -142,25 +148,42 @@ print(f"Holdout set size: {X_holdout.shape[0]}")
 # -----------------------------------------------------------------------------
 print("[SECTION] Configuring RandomForest bagging strategy")
 random_state: int = 42
-decision_threshold: float = 0.5
 balance_strategy: str = "class_weight"
+tuning_trials: int = 36
+threshold_grid = np.linspace(0.10, 0.90, 161)
 
-rf_params = {
-    "n_estimators": 600,
+base_rf_params = {
+    "n_estimators": 700,
     "criterion": "gini",
     "max_depth": None,
     "min_samples_split": 4,
     "min_samples_leaf": 2,
     "max_features": "sqrt",
     "bootstrap": True,
+    "max_samples": 0.85,
+    "class_weight": "balanced_subsample",
+}
+
+tuning_search_space = {
+    "n_estimators": [300, 500, 700, 900, 1200],
+    "max_depth": [None, 8, 12, 16, 24],
+    "min_samples_split": [2, 4, 8, 16],
+    "min_samples_leaf": [1, 2, 4, 8],
+    "max_features": ["sqrt", "log2", 0.3, 0.5, 0.7],
+    "class_weight": [None, "balanced", "balanced_subsample"],
+    "max_samples": [0.60, 0.75, 0.85, 1.0],
 }
 
 
 def build_rf_pipeline(random_state: int = 42, model_params: dict | None = None) -> Pipeline:
     if model_params is None:
-        model_params = rf_params
+        model_params = base_rf_params
 
-    class_weight = "balanced_subsample" if balance_strategy == "class_weight" else None
+    class_weight = model_params.get("class_weight")
+    if class_weight is None and balance_strategy == "class_weight":
+        class_weight = "balanced_subsample"
+
+    max_samples = model_params.get("max_samples", None)
 
     preprocessor = ColumnTransformer(
         transformers=[
@@ -191,12 +214,13 @@ def build_rf_pipeline(random_state: int = 42, model_params: dict | None = None) 
                 "model",
                 RandomForestClassifier(
                     n_estimators=model_params["n_estimators"],
-                    criterion=model_params["criterion"],
+                    criterion=model_params.get("criterion", "gini"),
                     max_depth=model_params["max_depth"],
                     min_samples_split=model_params["min_samples_split"],
                     min_samples_leaf=model_params["min_samples_leaf"],
                     max_features=model_params["max_features"],
-                    bootstrap=model_params["bootstrap"],
+                    bootstrap=model_params.get("bootstrap", True),
+                    max_samples=max_samples,
                     class_weight=class_weight,
                     n_jobs=-1,
                     random_state=random_state,
@@ -204,6 +228,71 @@ def build_rf_pipeline(random_state: int = 42, model_params: dict | None = None) 
             ),
         ]
     )
+
+
+def compute_binary_metrics(y_true: pd.Series, y_score: np.ndarray, threshold: float) -> dict:
+    y_pred = (y_score >= threshold).astype(int)
+    return {
+        "roc_auc": roc_auc_score(y_true, y_score),
+        "pr_auc": average_precision_score(y_true, y_score),
+        "f1": f1_score(y_true, y_pred, zero_division=0),
+        "macro_f1": f1_score(y_true, y_pred, average="macro", zero_division=0),
+        "balanced_accuracy": balanced_accuracy_score(y_true, y_pred),
+        "precision": precision_score(y_true, y_pred, zero_division=0),
+        "recall": recall_score(y_true, y_pred, zero_division=0),
+        "accuracy": accuracy_score(y_true, y_pred),
+    }
+
+
+def evaluate_rf_config(model_params: dict) -> dict:
+    fold_metrics = []
+    oof_scores = np.zeros(len(X_trainval), dtype=float)
+
+    for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X_trainval, y_trainval), 1):
+        X_fold_train = X_trainval.iloc[train_idx]
+        y_fold_train = y_trainval.iloc[train_idx]
+        X_fold_val = X_trainval.iloc[val_idx]
+        y_fold_val = y_trainval.iloc[val_idx]
+
+        fold_pipeline = build_rf_pipeline(
+            random_state=random_state + fold_idx,
+            model_params=model_params,
+        )
+        fold_pipeline.fit(X_fold_train, y_fold_train)
+
+        y_fold_score = fold_pipeline.predict_proba(X_fold_val)[:, 1]
+        oof_scores[val_idx] = y_fold_score
+
+        fold_metrics.append(
+            {
+                "fold": fold_idx,
+                **compute_binary_metrics(y_fold_val, y_fold_score, threshold=0.5),
+            }
+        )
+
+    best_threshold = 0.5
+    best_oof_macro_f1 = float("-inf")
+    for threshold in threshold_grid:
+        threshold_pred = (oof_scores >= threshold).astype(int)
+        threshold_macro_f1 = f1_score(y_trainval, threshold_pred, average="macro", zero_division=0)
+        if threshold_macro_f1 > best_oof_macro_f1:
+            best_oof_macro_f1 = float(threshold_macro_f1)
+            best_threshold = float(threshold)
+
+    oof_metrics = compute_binary_metrics(y_trainval, oof_scores, threshold=best_threshold)
+
+    return {
+        "params": model_params,
+        "fold_metrics": fold_metrics,
+        "best_threshold": best_threshold,
+        "oof_macro_f1": best_oof_macro_f1,
+        "oof_metrics": oof_metrics,
+        "cv_mean_macro_f1": float(np.mean([m["macro_f1"] for m in fold_metrics])),
+        "cv_std_macro_f1": float(np.std([m["macro_f1"] for m in fold_metrics])),
+        "cv_mean_roc_auc": float(np.mean([m["roc_auc"] for m in fold_metrics])),
+        "cv_mean_pr_auc": float(np.mean([m["pr_auc"] for m in fold_metrics])),
+        "cv_mean_balanced_accuracy": float(np.mean([m["balanced_accuracy"] for m in fold_metrics])),
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -218,9 +307,10 @@ run = wandb.init(
     config={
         "model_name": model_name,
         "random_state": random_state,
-        "decision_threshold": decision_threshold,
+        "tuning_trials": tuning_trials,
         "balance_strategy": balance_strategy,
-        "rf_params": rf_params,
+        "base_rf_params": base_rf_params,
+        "tuning_search_space": tuning_search_space,
         "noemp_option": noemp_option,
         "newexist_option": newexist_option,
         "createjob_option": createjob_option,
@@ -242,34 +332,232 @@ run = wandb.init(
         "citybank_other_label": citybank_other_label,
         "citybank_suffix": citybank_suffix,
         "citybank_drop_original": citybank_drop_original,
-        "n_train_rows": int(X_train.shape[0]),
+        "cv_n_splits": n_splits,
+        "n_trainval_rows": int(X_trainval.shape[0]),
         "n_holdout_rows": int(X_holdout.shape[0]),
-        "n_features": int(X_train.shape[1]),
+        "n_features": int(X_trainval.shape[1]),
     },
 )
 
 
 # -----------------------------------------------------------------------------
-# Train and evaluate
+# Randomized tuning on train/val split
 # -----------------------------------------------------------------------------
-print("[SECTION] Training RandomForest pipeline")
-rf_pipeline = build_rf_pipeline(random_state=random_state, model_params=rf_params)
-rf_pipeline.fit(X_train, y_train)
+print("[SECTION] Running randomized tuning with OOF threshold optimization")
 
-print("[SECTION] Running holdout predictions")
+tuning_candidates = list(
+    ParameterSampler(
+        param_distributions=tuning_search_space,
+        n_iter=tuning_trials,
+        random_state=random_state,
+    )
+)
+
+# Ensure baseline config is always evaluated.
+tuning_candidates.insert(0, base_rf_params.copy())
+
+tuning_results = []
+for trial_idx, candidate_params in enumerate(tuning_candidates, start=1):
+    result = evaluate_rf_config(candidate_params)
+    tuning_results.append(result)
+
+    wandb.log(
+        {
+            "tuning/trial": trial_idx,
+            "tuning/oof_macro_f1": result["oof_macro_f1"],
+            "tuning/cv_mean_macro_f1": result["cv_mean_macro_f1"],
+            "tuning/cv_std_macro_f1": result["cv_std_macro_f1"],
+            "tuning/cv_mean_roc_auc": result["cv_mean_roc_auc"],
+            "tuning/cv_mean_pr_auc": result["cv_mean_pr_auc"],
+            "tuning/cv_mean_balanced_accuracy": result["cv_mean_balanced_accuracy"],
+            "tuning/best_threshold": result["best_threshold"],
+        }
+    )
+
+    print(
+        f"Trial {trial_idx:02d}/{len(tuning_candidates)} | "
+        f"n_estimators={candidate_params['n_estimators']} "
+        f"max_depth={candidate_params['max_depth']} "
+        f"min_samples_leaf={candidate_params['min_samples_leaf']} "
+        f"max_features={candidate_params['max_features']} | "
+        f"OOF Macro-F1={result['oof_macro_f1']:.4f} "
+        f"BestThreshold={result['best_threshold']:.3f}"
+    )
+
+tuning_results_sorted = sorted(
+    tuning_results,
+    key=lambda item: item["oof_macro_f1"],
+    reverse=True,
+)
+best_tuning_result = tuning_results_sorted[0]
+best_rf_params = best_tuning_result["params"]
+decision_threshold = best_tuning_result["best_threshold"]
+
+print("[SECTION] Best RF tuning result selected")
+print(
+    f"Best OOF Macro-F1={best_tuning_result['oof_macro_f1']:.4f} | "
+    f"Decision threshold={decision_threshold:.3f}"
+)
+
+tuning_table = wandb.Table(
+    columns=[
+        "n_estimators",
+        "max_depth",
+        "min_samples_split",
+        "min_samples_leaf",
+        "max_features",
+        "class_weight",
+        "max_samples",
+        "cv_mean_macro_f1",
+        "cv_std_macro_f1",
+        "cv_mean_roc_auc",
+        "cv_mean_pr_auc",
+        "cv_mean_balanced_accuracy",
+        "oof_roc_auc",
+        "oof_pr_auc",
+        "oof_f1",
+        "oof_macro_f1",
+        "oof_balanced_accuracy",
+        "best_threshold",
+    ],
+    data=[
+        [
+            int(item["params"]["n_estimators"]),
+            str(item["params"]["max_depth"]),
+            int(item["params"]["min_samples_split"]),
+            int(item["params"]["min_samples_leaf"]),
+            str(item["params"]["max_features"]),
+            str(item["params"].get("class_weight")),
+            float(item["params"].get("max_samples", 1.0)),
+            float(item["cv_mean_macro_f1"]),
+            float(item["cv_std_macro_f1"]),
+            float(item["cv_mean_roc_auc"]),
+            float(item["cv_mean_pr_auc"]),
+            float(item["cv_mean_balanced_accuracy"]),
+            float(item["oof_metrics"]["roc_auc"]),
+            float(item["oof_metrics"]["pr_auc"]),
+            float(item["oof_metrics"]["f1"]),
+            float(item["oof_metrics"]["macro_f1"]),
+            float(item["oof_metrics"]["balanced_accuracy"]),
+            float(item["best_threshold"]),
+        ]
+        for item in tuning_results_sorted
+    ],
+)
+
+wandb.log(
+    {
+        "tuning/results_table": tuning_table,
+        "tuning/best_oof_macro_f1": float(best_tuning_result["oof_macro_f1"]),
+        "tuning/best_threshold": float(decision_threshold),
+        "selected/n_estimators": int(best_rf_params["n_estimators"]),
+        "selected/max_depth": str(best_rf_params["max_depth"]),
+        "selected/min_samples_split": int(best_rf_params["min_samples_split"]),
+        "selected/min_samples_leaf": int(best_rf_params["min_samples_leaf"]),
+        "selected/max_features": str(best_rf_params["max_features"]),
+        "selected/class_weight": str(best_rf_params.get("class_weight")),
+        "selected/max_samples": float(best_rf_params.get("max_samples", 1.0)),
+    }
+)
+
+# Re-log fold metrics in the existing cv/* format with the selected config.
+cv_fold_metrics = best_tuning_result["fold_metrics"]
+for fold_metrics in cv_fold_metrics:
+    fold_idx = fold_metrics["fold"]
+    wandb.log(
+        {
+            "cv/fold": fold_idx,
+            "cv/roc_auc": fold_metrics["roc_auc"],
+            "cv/pr_auc": fold_metrics["pr_auc"],
+            "cv/f1": fold_metrics["f1"],
+            "cv/macro_f1": fold_metrics["macro_f1"],
+            "cv/balanced_accuracy": fold_metrics["balanced_accuracy"],
+            "cv/precision": fold_metrics["precision"],
+            "cv/recall": fold_metrics["recall"],
+            "cv/accuracy": fold_metrics["accuracy"],
+        }
+    )
+
+cv_summary = {
+    "cv_mean_roc_auc": float(np.mean([m["roc_auc"] for m in cv_fold_metrics])),
+    "cv_std_roc_auc": float(np.std([m["roc_auc"] for m in cv_fold_metrics])),
+    "cv_mean_pr_auc": float(np.mean([m["pr_auc"] for m in cv_fold_metrics])),
+    "cv_std_pr_auc": float(np.std([m["pr_auc"] for m in cv_fold_metrics])),
+    "cv_mean_f1": float(np.mean([m["f1"] for m in cv_fold_metrics])),
+    "cv_std_f1": float(np.std([m["f1"] for m in cv_fold_metrics])),
+    "cv_mean_macro_f1": float(np.mean([m["macro_f1"] for m in cv_fold_metrics])),
+    "cv_std_macro_f1": float(np.std([m["macro_f1"] for m in cv_fold_metrics])),
+    "cv_mean_balanced_accuracy": float(np.mean([m["balanced_accuracy"] for m in cv_fold_metrics])),
+    "cv_std_balanced_accuracy": float(np.std([m["balanced_accuracy"] for m in cv_fold_metrics])),
+    "cv_mean_precision": float(np.mean([m["precision"] for m in cv_fold_metrics])),
+    "cv_std_precision": float(np.std([m["precision"] for m in cv_fold_metrics])),
+    "cv_mean_recall": float(np.mean([m["recall"] for m in cv_fold_metrics])),
+    "cv_std_recall": float(np.std([m["recall"] for m in cv_fold_metrics])),
+    "cv_mean_accuracy": float(np.mean([m["accuracy"] for m in cv_fold_metrics])),
+    "cv_std_accuracy": float(np.std([m["accuracy"] for m in cv_fold_metrics])),
+    "oof_roc_auc": float(best_tuning_result["oof_metrics"]["roc_auc"]),
+    "oof_pr_auc": float(best_tuning_result["oof_metrics"]["pr_auc"]),
+    "oof_f1": float(best_tuning_result["oof_metrics"]["f1"]),
+    "oof_macro_f1": float(best_tuning_result["oof_metrics"]["macro_f1"]),
+    "oof_balanced_accuracy": float(best_tuning_result["oof_metrics"]["balanced_accuracy"]),
+    "decision_threshold": float(decision_threshold),
+}
+
+cv_table = wandb.Table(
+    columns=[
+        "fold",
+        "roc_auc",
+        "pr_auc",
+        "f1",
+        "macro_f1",
+        "balanced_accuracy",
+        "precision",
+        "recall",
+        "accuracy",
+    ],
+    data=[
+        [
+            int(m["fold"]),
+            float(m["roc_auc"]),
+            float(m["pr_auc"]),
+            float(m["f1"]),
+            float(m["macro_f1"]),
+            float(m["balanced_accuracy"]),
+            float(m["precision"]),
+            float(m["recall"]),
+            float(m["accuracy"]),
+        ]
+        for m in cv_fold_metrics
+    ],
+)
+
+wandb.log({"cv/folds_table": cv_table, **cv_summary})
+
+print("[SECTION] Cross-validation summary")
+print(f"CV ROC-AUC: {cv_summary['cv_mean_roc_auc']:.4f} +/- {cv_summary['cv_std_roc_auc']:.4f}")
+print(f"CV PR-AUC: {cv_summary['cv_mean_pr_auc']:.4f} +/- {cv_summary['cv_std_pr_auc']:.4f}")
+print(f"CV F1: {cv_summary['cv_mean_f1']:.4f} +/- {cv_summary['cv_std_f1']:.4f}")
+print(f"CV Macro-F1: {cv_summary['cv_mean_macro_f1']:.4f} +/- {cv_summary['cv_std_macro_f1']:.4f}")
+print(f"OOF Macro-F1 (best trial): {cv_summary['oof_macro_f1']:.4f}")
+print(f"Decision threshold from OOF: {decision_threshold:.3f}")
+
+
+# -----------------------------------------------------------------------------
+# Train final model on train/val split
+# -----------------------------------------------------------------------------
+print("[SECTION] Training RandomForest pipeline on full train/val split")
+rf_pipeline = build_rf_pipeline(random_state=random_state, model_params=best_rf_params)
+rf_pipeline.fit(X_trainval, y_trainval)
+
+
+# -----------------------------------------------------------------------------
+# Running holdout predictions and metric evaluation
+# -----------------------------------------------------------------------------
+print("[SECTION] Running holdout predictions and metric evaluation")
 y_score = rf_pipeline.predict_proba(X_holdout)[:, 1]
 y_pred = (y_score >= decision_threshold).astype(int)
 
-metrics = {
-    "roc_auc": roc_auc_score(y_holdout, y_score),
-    "pr_auc": average_precision_score(y_holdout, y_score),
-    "f1": f1_score(y_holdout, y_pred, zero_division=0),
-    "macro_f1": f1_score(y_holdout, y_pred, average="macro", zero_division=0),
-    "balanced_accuracy": balanced_accuracy_score(y_holdout, y_pred),
-    "precision": precision_score(y_holdout, y_pred, zero_division=0),
-    "recall": recall_score(y_holdout, y_pred, zero_division=0),
-    "accuracy": accuracy_score(y_holdout, y_pred),
-}
+metrics = compute_binary_metrics(y_holdout, y_score, decision_threshold)
 
 cm = confusion_matrix(y_holdout, y_pred)
 report = classification_report(y_holdout, y_pred, output_dict=True, zero_division=0)
@@ -292,7 +580,14 @@ print(f"Predicted positive rate: {positive_rate:.4f}")
 print("[SECTION] Logging to W&B")
 wandb.log(
     {
-        **metrics,
+        "holdout/roc_auc": metrics["roc_auc"],
+        "holdout/pr_auc": metrics["pr_auc"],
+        "holdout/f1": metrics["f1"],
+        "holdout/macro_f1": metrics["macro_f1"],
+        "holdout/balanced_accuracy": metrics["balanced_accuracy"],
+        "holdout/precision": metrics["precision"],
+        "holdout/recall": metrics["recall"],
+        "holdout/accuracy": metrics["accuracy"],
         "predicted_positive_rate": positive_rate,
         "decision_threshold": decision_threshold,
         "tn": int(cm[0, 0]),
@@ -343,7 +638,7 @@ run.finish()
 saved_paths = save_model(
     model_pipeline=rf_pipeline,
     preprocessing_options=options,
-    feature_names=X_train.columns.tolist(),
+    feature_names=X_trainval.columns.tolist(),
     project_root=project_root,
     model_name=model_name,
 )
@@ -365,3 +660,45 @@ if create_kaggle_csv:
         verbose=False,
     )
     print(f"Kaggle submission generated: {submission_path}")
+# Best approach for improving Macro_F1 with RandomForest is to tune model complexity and decision threshold together, using your current CV setup and keeping holdout untouched until the end.
+
+# Optimize the right objective
+# Use CV mean Macro_F1 as primary score.
+# Also track CV std Macro_F1 so you prefer stable configs, not just lucky ones.
+# Keep holdout as final one-time check only.
+# Tune threshold, not just hyperparameters
+# RandomForest probabilities are often poorly calibrated for F1-style objectives.
+# For each CV trial, generate out-of-fold probabilities, then sweep thresholds (for example 0.10 to 0.90).
+# Select the threshold that maximizes OOF Macro_F1, and log it to W&B.
+# This alone often gives a bigger Macro_F1 lift than small parameter tweaks.
+# Use a strong but compact RF search space
+# n_estimators: 300 to 1500
+# max_depth: None, 8, 12, 16, 24
+# min_samples_split: 2, 4, 8, 16
+# min_samples_leaf: 1, 2, 4, 8
+# max_features: sqrt, log2, 0.3, 0.5, 0.7
+# class_weight: None, balanced, balanced_subsample
+# bootstrap: True
+# max_samples (if bootstrap=True): 0.6 to 1.0
+# Use randomized/Bayesian search instead of grid
+# Grid is expensive and usually wasteful for RF.
+# Use RandomizedSearchCV or Optuna with 80 to 200 trials.
+# If runtime is tight, do 2-stage tuning:
+# Coarse search with fewer trees (for example n_estimators 200 to 500).
+
+# Refit top configs with larger n_estimators (800 to 1500).
+
+# Improve minority-class recall carefully
+
+# Since Macro_F1 penalizes weak minority performance, favor settings that increase minority recall without collapsing precision.
+# class_weight and min_samples_leaf are usually the highest-impact knobs for this tradeoff.
+# Add calibration as an optional second pass
+# After selecting best RF params, try calibrated probabilities (Platt or isotonic), then retune threshold.
+# Sometimes Macro_F1 improves because thresholding becomes more reliable.
+# W&B metrics to log per trial
+# cv_mean_macro_f1, cv_std_macro_f1
+# oof_macro_f1
+# best_threshold_from_oof
+# per-class precision/recall/F1
+# positive prediction rate
+# holdout_macro_f1 only for final selected model
