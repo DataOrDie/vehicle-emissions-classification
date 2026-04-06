@@ -150,6 +150,8 @@ print(f"StratifiedKFold splits: {n_splits}")
 print("[SECTION] Configuring RandomForest bagging strategy")
 random_state: int = 42
 balance_strategy: str = "class_weight"
+# balance_strategy: str = "oversample_reject"
+# Options: "none" | "class_weight" | "oversample_reject"
 tuning_trials: int = 24
 threshold_grid = np.linspace(0.12, 0.88, 153)
 
@@ -169,9 +171,12 @@ def build_rf_pipeline(random_state: int = 42, model_params: dict | None = None) 
     if model_params is None:
         model_params = base_rf_params
 
-    class_weight = model_params.get("class_weight")
-    if class_weight is None and balance_strategy == "class_weight":
-        class_weight = "balanced_subsample"
+    if balance_strategy == "class_weight":
+        class_weight = model_params.get("class_weight")
+        if class_weight is None:
+            class_weight = "balanced_subsample"
+    else:
+        class_weight = None
 
     max_samples = model_params.get("max_samples", None)
 
@@ -234,6 +239,38 @@ def compute_binary_metrics(y_true: pd.Series, y_score: np.ndarray, threshold: fl
     }
 
 
+def rebalance_training_data(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    strategy: str,
+    random_state: int = 42,
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Apply class balancing on the training split only."""
+
+    if strategy != "oversample_reject":
+        return X_train, y_train
+
+    train_frame = X_train.copy()
+    train_frame[target_col] = y_train.values
+
+    reject_rows = train_frame[train_frame[target_col] == 0]
+    approve_rows = train_frame[train_frame[target_col] == 1]
+
+    if reject_rows.empty or approve_rows.empty:
+        return X_train, y_train
+
+    reject_rows = reject_rows.sample(
+        n=len(approve_rows),
+        replace=True,
+        random_state=random_state,
+    )
+
+    balanced = pd.concat([approve_rows, reject_rows], ignore_index=True)
+    balanced = balanced.sample(frac=1.0, random_state=random_state).reset_index(drop=True)
+
+    return balanced.drop(columns=[target_col]), balanced[target_col]
+
+
 def evaluate_rf_config(model_params: dict) -> dict:
     fold_metrics = []
     oof_scores = np.zeros(len(X_trainval), dtype=float)
@@ -243,6 +280,13 @@ def evaluate_rf_config(model_params: dict) -> dict:
         y_fold_train = y_trainval.iloc[train_idx]
         X_fold_val = X_trainval.iloc[val_idx]
         y_fold_val = y_trainval.iloc[val_idx]
+
+        X_fold_train, y_fold_train = rebalance_training_data(
+            X_fold_train,
+            y_fold_train,
+            strategy=balance_strategy,
+            random_state=random_state + fold_idx,
+        )
 
         fold_pipeline = build_rf_pipeline(
             random_state=random_state + fold_idx,
@@ -299,6 +343,12 @@ run = wandb.init(
         "random_state": random_state,
         "tuning_trials": tuning_trials,
         "balance_strategy": balance_strategy,
+        "balance_target_column": target_col,
+        "accept_label": 1,
+        "reject_label": 0,
+        "oversample_target_label": 0 if balance_strategy == "oversample_reject" else None,
+        "rebalance_applied_in_cv": balance_strategy == "oversample_reject",
+        "rebalance_applied_in_final_fit": balance_strategy == "oversample_reject",
         "base_rf_params": base_rf_params,
         "tuning_algorithm": "optuna_tpe",
         "noemp_option": noemp_option,
@@ -339,6 +389,11 @@ tuning_results = []
 
 
 def sample_rf_params(trial: optuna.Trial) -> dict:
+    if balance_strategy == "class_weight":
+        class_weight = trial.suggest_categorical("class_weight", ["balanced", "balanced_subsample"])
+    else:
+        class_weight = None
+
     return {
         "n_estimators": trial.suggest_categorical("n_estimators", [700, 900, 1100, 1300, 1500]),
         "criterion": "gini",
@@ -347,7 +402,7 @@ def sample_rf_params(trial: optuna.Trial) -> dict:
         "min_samples_leaf": trial.suggest_categorical("min_samples_leaf", [1, 2, 3, 4]),
         "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2", 0.25, 0.35, 0.5]),
         "bootstrap": True,
-        "class_weight": trial.suggest_categorical("class_weight", ["balanced", "balanced_subsample"]),
+        "class_weight": class_weight,
         "max_samples": trial.suggest_categorical("max_samples", [0.75, 0.85, 0.95, 1.0]),
     }
 
@@ -396,8 +451,12 @@ study.enqueue_trial(
         "min_samples_split": base_rf_params["min_samples_split"],
         "min_samples_leaf": base_rf_params["min_samples_leaf"],
         "max_features": base_rf_params["max_features"],
-        "class_weight": base_rf_params["class_weight"],
         "max_samples": base_rf_params["max_samples"],
+        **(
+            {"class_weight": base_rf_params["class_weight"]}
+            if balance_strategy == "class_weight"
+            else {}
+        ),
     }
 )
 study.optimize(tuning_objective, n_trials=tuning_trials)
@@ -565,7 +624,13 @@ print(f"Decision threshold from OOF: {decision_threshold:.3f}")
 # -----------------------------------------------------------------------------
 print("[SECTION] Training RandomForest pipeline on full train/val split")
 rf_pipeline = build_rf_pipeline(random_state=random_state, model_params=best_rf_params)
-rf_pipeline.fit(X_trainval, y_trainval)
+X_trainval_fit, y_trainval_fit = rebalance_training_data(
+    X_trainval,
+    y_trainval,
+    strategy=balance_strategy,
+    random_state=random_state,
+)
+rf_pipeline.fit(X_trainval_fit, y_trainval_fit)
 
 
 # -----------------------------------------------------------------------------
@@ -678,45 +743,3 @@ if create_kaggle_csv:
         verbose=False,
     )
     print(f"Kaggle submission generated: {submission_path}")
-# Best approach for improving Macro_F1 with RandomForest is to tune model complexity and decision threshold together, using your current CV setup and keeping holdout untouched until the end.
-
-# Optimize the right objective
-# Use CV mean Macro_F1 as primary score.
-# Also track CV std Macro_F1 so you prefer stable configs, not just lucky ones.
-# Keep holdout as final one-time check only.
-# Tune threshold, not just hyperparameters
-# RandomForest probabilities are often poorly calibrated for F1-style objectives.
-# For each CV trial, generate out-of-fold probabilities, then sweep thresholds (for example 0.10 to 0.90).
-# Select the threshold that maximizes OOF Macro_F1, and log it to W&B.
-# This alone often gives a bigger Macro_F1 lift than small parameter tweaks.
-# Use a strong but compact RF search space
-# n_estimators: 300 to 1500
-# max_depth: None, 8, 12, 16, 24
-# min_samples_split: 2, 4, 8, 16
-# min_samples_leaf: 1, 2, 4, 8
-# max_features: sqrt, log2, 0.3, 0.5, 0.7
-# class_weight: None, balanced, balanced_subsample
-# bootstrap: True
-# max_samples (if bootstrap=True): 0.6 to 1.0
-# Use randomized/Bayesian search instead of grid
-# Grid is expensive and usually wasteful for RF.
-# Use RandomizedSearchCV or Optuna with 80 to 200 trials.
-# If runtime is tight, do 2-stage tuning:
-# Coarse search with fewer trees (for example n_estimators 200 to 500).
-
-# Refit top configs with larger n_estimators (800 to 1500).
-
-# Improve minority-class recall carefully
-
-# Since Macro_F1 penalizes weak minority performance, favor settings that increase minority recall without collapsing precision.
-# class_weight and min_samples_leaf are usually the highest-impact knobs for this tradeoff.
-# Add calibration as an optional second pass
-# After selecting best RF params, try calibrated probabilities (Platt or isotonic), then retune threshold.
-# Sometimes Macro_F1 improves because thresholding becomes more reliable.
-# W&B metrics to log per trial
-# cv_mean_macro_f1, cv_std_macro_f1
-# oof_macro_f1
-# best_threshold_from_oof
-# per-class precision/recall/F1
-# positive prediction rate
-# holdout_macro_f1 only for final selected model
