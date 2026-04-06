@@ -149,15 +149,15 @@ print(f"StratifiedKFold splits: {n_splits}")
 print("[SECTION] Configuring RandomForest bagging strategy")
 random_state: int = 42
 balance_strategy: str = "class_weight"
-tuning_trials: int = 36
-threshold_grid = np.linspace(0.10, 0.90, 161)
+tuning_trials: int = 24
+threshold_grid = np.linspace(0.12, 0.88, 153)
 
 base_rf_params = {
-    "n_estimators": 700,
+    "n_estimators": 900,
     "criterion": "gini",
     "max_depth": None,
-    "min_samples_split": 4,
-    "min_samples_leaf": 2,
+    "min_samples_split": 2,
+    "min_samples_leaf": 1,
     "max_features": "sqrt",
     "bootstrap": True,
     "max_samples": 0.85,
@@ -165,13 +165,13 @@ base_rf_params = {
 }
 
 tuning_search_space = {
-    "n_estimators": [300, 500, 700, 900, 1200],
-    "max_depth": [None, 8, 12, 16, 24],
-    "min_samples_split": [2, 4, 8, 16],
-    "min_samples_leaf": [1, 2, 4, 8],
-    "max_features": ["sqrt", "log2", 0.3, 0.5, 0.7],
-    "class_weight": [None, "balanced", "balanced_subsample"],
-    "max_samples": [0.60, 0.75, 0.85, 1.0],
+    "n_estimators": [700, 900, 1100, 1300, 1500],
+    "max_depth": [None, 16, 24, 32],
+    "min_samples_split": [2, 4, 6, 8],
+    "min_samples_leaf": [1, 2, 3, 4],
+    "max_features": ["sqrt", "log2", 0.25, 0.35, 0.5],
+    "class_weight": ["balanced", "balanced_subsample"],
+    "max_samples": [0.75, 0.85, 0.95, 1.0],
 }
 
 
