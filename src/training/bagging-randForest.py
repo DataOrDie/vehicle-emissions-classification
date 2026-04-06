@@ -149,8 +149,8 @@ print(f"StratifiedKFold splits: {n_splits}")
 # -----------------------------------------------------------------------------
 print("[SECTION] Configuring RandomForest bagging strategy")
 random_state: int = 42
-balance_strategy: str = "class_weight"
-# balance_strategy: str = "oversample_reject"
+# balance_strategy: str = "class_weight"
+balance_strategy: str = "oversample_reject"
 # Options: "none" | "class_weight" | "oversample_reject"
 tuning_trials: int = 24
 threshold_grid = np.linspace(0.12, 0.88, 153)
