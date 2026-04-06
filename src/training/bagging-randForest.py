@@ -3,6 +3,7 @@ import sys
 import importlib.util
 
 import numpy as np
+import optuna
 import pandas as pd
 import wandb
 from sklearn.compose import ColumnTransformer, make_column_selector
@@ -19,7 +20,7 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import ParameterSampler, StratifiedKFold, train_test_split
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
@@ -164,17 +165,6 @@ base_rf_params = {
     "class_weight": "balanced_subsample",
 }
 
-tuning_search_space = {
-    "n_estimators": [700, 900, 1100, 1300, 1500],
-    "max_depth": [None, 16, 24, 32],
-    "min_samples_split": [2, 4, 6, 8],
-    "min_samples_leaf": [1, 2, 3, 4],
-    "max_features": ["sqrt", "log2", 0.25, 0.35, 0.5],
-    "class_weight": ["balanced", "balanced_subsample"],
-    "max_samples": [0.75, 0.85, 0.95, 1.0],
-}
-
-
 def build_rf_pipeline(random_state: int = 42, model_params: dict | None = None) -> Pipeline:
     if model_params is None:
         model_params = base_rf_params
@@ -310,7 +300,7 @@ run = wandb.init(
         "tuning_trials": tuning_trials,
         "balance_strategy": balance_strategy,
         "base_rf_params": base_rf_params,
-        "tuning_search_space": tuning_search_space,
+        "tuning_algorithm": "optuna_tpe",
         "noemp_option": noemp_option,
         "newexist_option": newexist_option,
         "createjob_option": createjob_option,
@@ -341,24 +331,32 @@ run = wandb.init(
 
 
 # -----------------------------------------------------------------------------
-# Randomized tuning on train/val split
+# Optuna tuning on train/val split
 # -----------------------------------------------------------------------------
-print("[SECTION] Running randomized tuning with OOF threshold optimization")
-
-tuning_candidates = list(
-    ParameterSampler(
-        param_distributions=tuning_search_space,
-        n_iter=tuning_trials,
-        random_state=random_state,
-    )
-)
-
-# Ensure baseline config is always evaluated.
-tuning_candidates.insert(0, base_rf_params.copy())
+print("[SECTION] Running Optuna tuning with OOF threshold optimization")
 
 tuning_results = []
-for trial_idx, candidate_params in enumerate(tuning_candidates, start=1):
+
+
+def sample_rf_params(trial: optuna.Trial) -> dict:
+    return {
+        "n_estimators": trial.suggest_categorical("n_estimators", [700, 900, 1100, 1300, 1500]),
+        "criterion": "gini",
+        "max_depth": trial.suggest_categorical("max_depth", [None, 16, 24, 32]),
+        "min_samples_split": trial.suggest_categorical("min_samples_split", [2, 4, 6, 8]),
+        "min_samples_leaf": trial.suggest_categorical("min_samples_leaf", [1, 2, 3, 4]),
+        "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2", 0.25, 0.35, 0.5]),
+        "bootstrap": True,
+        "class_weight": trial.suggest_categorical("class_weight", ["balanced", "balanced_subsample"]),
+        "max_samples": trial.suggest_categorical("max_samples", [0.75, 0.85, 0.95, 1.0]),
+    }
+
+
+def tuning_objective(trial: optuna.Trial) -> float:
+    candidate_params = sample_rf_params(trial)
     result = evaluate_rf_config(candidate_params)
+    trial_idx = trial.number + 1
+
     tuning_results.append(result)
 
     wandb.log(
@@ -375,7 +373,7 @@ for trial_idx, candidate_params in enumerate(tuning_candidates, start=1):
     )
 
     print(
-        f"Trial {trial_idx:02d}/{len(tuning_candidates)} | "
+        f"Trial {trial_idx:02d}/{tuning_trials} | "
         f"n_estimators={candidate_params['n_estimators']} "
         f"max_depth={candidate_params['max_depth']} "
         f"min_samples_leaf={candidate_params['min_samples_leaf']} "
@@ -383,6 +381,26 @@ for trial_idx, candidate_params in enumerate(tuning_candidates, start=1):
         f"OOF Macro-F1={result['oof_macro_f1']:.4f} "
         f"BestThreshold={result['best_threshold']:.3f}"
     )
+
+    return float(result["oof_macro_f1"])
+
+
+study = optuna.create_study(
+    direction="maximize",
+    sampler=optuna.samplers.TPESampler(seed=random_state),
+)
+study.enqueue_trial(
+    {
+        "n_estimators": base_rf_params["n_estimators"],
+        "max_depth": base_rf_params["max_depth"],
+        "min_samples_split": base_rf_params["min_samples_split"],
+        "min_samples_leaf": base_rf_params["min_samples_leaf"],
+        "max_features": base_rf_params["max_features"],
+        "class_weight": base_rf_params["class_weight"],
+        "max_samples": base_rf_params["max_samples"],
+    }
+)
+study.optimize(tuning_objective, n_trials=tuning_trials)
 
 tuning_results_sorted = sorted(
     tuning_results,
