@@ -161,7 +161,7 @@ base_rf_params = {
     "max_depth": None,
     "min_samples_split": 2,
     "min_samples_leaf": 1,
-    "max_features": "sqrt",
+    "max_features": 0.35,
     "bootstrap": True,
     "max_samples": 0.85,
     "class_weight": "balanced_subsample",
@@ -395,15 +395,15 @@ def sample_rf_params(trial: optuna.Trial) -> dict:
         class_weight = None
 
     return {
-        "n_estimators": trial.suggest_categorical("n_estimators", [700, 900, 1100, 1300, 1500]),
+        "n_estimators": trial.suggest_int("n_estimators", 700, 1500, step=100),
         "criterion": "gini",
         "max_depth": trial.suggest_categorical("max_depth", [None, 16, 24, 32]),
-        "min_samples_split": trial.suggest_categorical("min_samples_split", [2, 4, 6, 8]),
-        "min_samples_leaf": trial.suggest_categorical("min_samples_leaf", [1, 2, 3, 4]),
-        "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2", 0.25, 0.35, 0.5]),
+        "min_samples_split": trial.suggest_int("min_samples_split", 2, 10, step=2),
+        "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 6),
+        "max_features": trial.suggest_float("max_features", 0.20, 0.70),
         "bootstrap": True,
         "class_weight": class_weight,
-        "max_samples": trial.suggest_categorical("max_samples", [0.75, 0.85, 0.95, 1.0]),
+        "max_samples": trial.suggest_float("max_samples", 0.70, 1.00),
     }
 
 
