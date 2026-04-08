@@ -6,6 +6,7 @@ def preprocess_approvaldate(df, option="A", source_col="ApprovalDate"):
     Preprocesa la columna ApprovalDate.
     Opción A: Extrae Año y Mes, rellena nulos con la moda y normaliza (MinMax) entre 0 y 1.
     Opción B: Convierte la columna a formato datetime y la mantiene entera.
+    Opción C: Extrae Año y Mes, rellena nulos con la moda y mantiene columnas limpias sin normalizar.
     """
     # Creamos una copia para no modificar el DataFrame original por accidente
     df_out = df.copy()
@@ -38,6 +39,20 @@ def preprocess_approvaldate(df, option="A", source_col="ApprovalDate"):
         
         # 4. Limpieza: Borramos la fecha original y las temporales que no están normalizadas
         df_out = df_out.drop(columns=[source_col, 'ApprovalYear', 'ApprovalMonth'])
+
+    elif option == "C":
+        # Opción C: igual que A, pero conserva las columnas limpias sin normalizar
+        df_out['ApprovalYear'] = fechas.dt.year
+        df_out['ApprovalMonth'] = fechas.dt.month
+
+        moda_y = df_out['ApprovalYear'].mode()[0]
+        moda_m = df_out['ApprovalMonth'].mode()[0]
+
+        df_out['ApprovalYear'] = df_out['ApprovalYear'].fillna(moda_y).astype(int)
+        df_out['ApprovalMonth'] = df_out['ApprovalMonth'].fillna(moda_m).astype(int)
+
+        # Eliminamos la columna original de texto y dejamos Año/Mes limpios
+        df_out = df_out.drop(columns=[source_col])
         
     elif option == "B":
         # Opción B: Simplemente guardamos la fecha limpia en formato datetime por si alguien la necesita entera

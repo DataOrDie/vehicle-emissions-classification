@@ -1,0 +1,338 @@
+"""One-step preprocessing pipeline.
+
+This module centralizes the full preprocessing flow currently used in
+`notebooks/feature-enginnering.ipynb` so it can be imported and reused from
+scripts, training code, or other notebooks.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from preprocessing import LowDoc
+from preprocessing import RevLineCr
+from preprocessing import accept
+from preprocessing import approvalDate
+from preprocessing import approvalFY
+from preprocessing import balanceGross
+from preprocessing import base_cleaning
+from preprocessing import city_bank
+from preprocessing import createJob
+from preprocessing import disbursementDate
+from preprocessing import disbursementGross
+from preprocessing import franchise_code
+from preprocessing import newExists
+from preprocessing import noemp
+from preprocessing import retainedJob
+from preprocessing import urban_rural
+
+
+@dataclass
+class OneStepOptions:
+	"""Default options aligned with notebooks/feature-enginnering.ipynb."""
+
+	noemp_option: str = "log"
+	newexist_option: str = "A"
+	createjob_option: str = "A"
+	retainedjob_option: str = "A"
+	approvaldate_option: str = "A"
+	approvalfy_option: str = "A"
+	franchise_option: str = "binary"
+	urbanrural_option: str = "onehot"
+	revlinecr_option: str = "C"
+	lowdoc_option: str = "C"
+	disbursementgross_option: str = "A"
+	balancegross_option: str = "drop"
+	accept_option: str = "skip"
+	local_state: str = "IL"
+
+	#---- City/Bank options ----#
+	citybank_option: str = "freq_bucket"
+	city_top_k: int = 120
+	bank_top_k: int = 80
+	city_min_count: int | None = None
+	bank_min_count: int | None = None
+	citybank_other_label: str = "OTHER"
+	citybank_suffix: str = "_bucket"
+	citybank_drop_original: bool = False
+	#----- City/Bank options end -----#
+
+def get_default_options() -> dict[str, Any]:
+	"""Return notebook-aligned defaults for all preprocessing steps."""
+	return asdict(OneStepOptions())
+
+
+def add_tree_features(
+	df_frame: pd.DataFrame,
+	raw_dates: pd.DataFrame | None = None,
+	options: OneStepOptions | None = None,
+) -> pd.DataFrame:
+	"""Add tree-focused interaction features used by bagging/tree models."""
+
+	engineered = df_frame.copy()
+	opts = options or OneStepOptions()
+
+	# Tree models only use the high-frequency bucketed version.
+	if {"City", "Bank"}.issubset(engineered.columns):
+		citybank_option = str(opts.citybank_option).upper()
+		if citybank_option == "FREQ_BUCKET":
+			engineered, _ = city_bank.configure_city_bank_frequency_buckets(
+				engineered,
+				city_top_k=opts.city_top_k,
+				bank_top_k=opts.bank_top_k,
+				city_min_count=opts.city_min_count,
+				bank_min_count=opts.bank_min_count,
+				other_label=opts.citybank_other_label,
+				suffix=opts.citybank_suffix,
+				drop_original=opts.citybank_drop_original,
+			)
+		elif citybank_option not in {"BINARY", "SKIP"}:
+			raise ValueError("citybank_option must be 'freq_bucket', 'binary', or 'skip'")
+
+	if {"NoEmp", "DisbursementGross"}.issubset(engineered.columns):
+		noemp = pd.to_numeric(engineered["NoEmp"], errors="coerce").clip(lower=0)
+		disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
+		employee_denominator = noemp.clip(lower=1)
+
+		engineered["loan_per_employee_log"] = np.log1p(
+			(disbursement_gross / employee_denominator).clip(lower=0)
+		)
+
+	if {"CreateJob", "RetainedJob"}.issubset(engineered.columns):
+		create_job = pd.to_numeric(engineered["CreateJob"], errors="coerce").clip(lower=0)
+		retained_job = pd.to_numeric(engineered["RetainedJob"], errors="coerce").clip(lower=0)
+		total_jobs = create_job + retained_job
+
+		engineered["jobs_total"] = total_jobs
+		engineered["jobs_gap"] = retained_job - create_job
+		engineered["jobs_total_log"] = np.log1p(total_jobs)
+
+		if "DisbursementGross" in engineered.columns:
+			disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
+			engineered["loan_per_job"] = disbursement_gross / total_jobs.clip(lower=1)
+
+	if {"NoEmp", "CreateJob", "RetainedJob"}.issubset(engineered.columns):
+		noemp = pd.to_numeric(engineered["NoEmp"], errors="coerce").clip(lower=0)
+		total_jobs = (
+			pd.to_numeric(engineered["CreateJob"], errors="coerce").clip(lower=0)
+			+ pd.to_numeric(engineered["RetainedJob"], errors="coerce").clip(lower=0)
+		)
+		engineered["jobs_per_employee"] = total_jobs / noemp.clip(lower=1)
+
+	approval_dates: pd.Series | None = None
+	disbursement_dates: pd.Series | None = None
+
+	if "ApprovalDate" in engineered.columns:
+		approval_dates = pd.to_datetime(
+			engineered["ApprovalDate"],
+			format="%d-%b-%y",
+			errors="coerce",
+		)
+	elif raw_dates is not None and "ApprovalDate" in raw_dates.columns:
+		approval_dates = pd.to_datetime(
+			raw_dates["ApprovalDate"],
+			format="%d-%b-%y",
+			errors="coerce",
+		)
+	elif {"ApprovalYear", "ApprovalMonth"}.issubset(engineered.columns):
+		approval_dates = pd.to_datetime(
+			dict(
+				year=pd.to_numeric(engineered["ApprovalYear"], errors="coerce"),
+				month=pd.to_numeric(engineered["ApprovalMonth"], errors="coerce"),
+				day=1,
+			),
+			errors="coerce",
+		)
+
+	if "DisbursementDate" in engineered.columns:
+		disbursement_dates = pd.to_datetime(
+			engineered["DisbursementDate"],
+			format="%d-%b-%y",
+			errors="coerce",
+		)
+	elif raw_dates is not None and "DisbursementDate" in raw_dates.columns:
+		disbursement_dates = pd.to_datetime(
+			raw_dates["DisbursementDate"],
+			format="%d-%b-%y",
+			errors="coerce",
+		)
+
+	if approval_dates is not None:
+		engineered["approval_year"] = approval_dates.dt.year
+		engineered["approval_month"] = approval_dates.dt.month
+
+	if disbursement_dates is not None:
+		engineered["disbursement_year"] = disbursement_dates.dt.year
+		engineered["disbursement_month"] = disbursement_dates.dt.month
+
+	if approval_dates is not None and disbursement_dates is not None:
+		days_delta = (disbursement_dates - approval_dates).dt.days
+		days_delta = days_delta.where(days_delta >= 0)
+		upper_bound = days_delta.quantile(0.99)
+		if pd.notna(upper_bound):
+			days_delta = days_delta.clip(lower=0, upper=upper_bound)
+		engineered["days_approval_to_disbursement"] = days_delta
+
+	if {"IsLocalBank", "DisbursementGross"}.issubset(engineered.columns):
+		is_local_bank = pd.to_numeric(engineered["IsLocalBank"], errors="coerce").fillna(0)
+		disbursement_gross = pd.to_numeric(engineered["DisbursementGross"], errors="coerce")
+		engineered["local_bank_loan"] = is_local_bank * disbursement_gross
+
+	# if {"approvalyear_normalized", "approvalmonth_normalized"}.issubset(engineered.columns):
+	# 	engineered["approval_time_index"] = (
+	# 		pd.to_numeric(engineered["approvalyear_normalized"], errors="coerce") * 12.0
+	# 		+ pd.to_numeric(engineered["approvalmonth_normalized"], errors="coerce")
+	# 	)
+	# elif {"ApprovalYear", "ApprovalMonth"}.issubset(engineered.columns):
+	# 	engineered["approval_time_index"] = (
+	# 		pd.to_numeric(engineered["ApprovalYear"], errors="coerce") * 12.0
+	# 		+ pd.to_numeric(engineered["ApprovalMonth"], errors="coerce")
+	# 	)
+
+	engineered = engineered.replace([np.inf, -np.inf], np.nan)
+	return engineered
+
+
+def preprocess_one_step(
+	df: pd.DataFrame,
+	options: OneStepOptions | None = None,
+	is_tree_model: bool = False,
+) -> pd.DataFrame:
+	"""Run all preprocessing modules in notebook order.
+
+	Parameters
+	----------
+	df : pd.DataFrame
+		Input raw dataframe.
+	options : OneStepOptions | None
+		Pipeline options. If None, notebook defaults are used.
+	is_tree_model : bool
+		When True, append tree-focused engineered interaction features.
+	"""
+	opts = options or OneStepOptions()
+
+	df_out = df.copy()
+	raw_dates = None
+	if is_tree_model:
+		available_date_cols = [
+			col
+			for col in ["ApprovalDate", "DisbursementDate"]
+			if col in df_out.columns
+		]
+		if available_date_cols:
+			raw_dates = df_out[available_date_cols].copy()
+
+	# 1) Base cleanup
+	df_out = base_cleaning.clean_base_columns(df_out, local_state=opts.local_state)
+
+	# 2) NoEmp
+	df_out = noemp.preprocess_noemp(df_out, option=opts.noemp_option, source_col="NoEmp")
+
+	# 3) City/Bank encoding
+	citybank_option = str(opts.citybank_option).upper()
+	if citybank_option == "BINARY":
+		df_out = city_bank.get_city_bank_encoder(df_out)
+	elif citybank_option not in {"FREQ_BUCKET", "SKIP"}:
+		raise ValueError("citybank_option must be 'freq_bucket', 'binary', or 'skip'")
+
+	# 4) NewExist
+	df_out = newExists.preprocess_newexist(
+		df=df_out,
+		option=opts.newexist_option,
+		source_col="NewExist",
+	)
+
+	# 5) CreateJob
+	df_out = createJob.preprocess_createjob(
+		df=df_out,
+		option=opts.createjob_option,
+		source_col="CreateJob",
+	)
+
+	# 6) RetainedJob
+	df_out = retainedJob.preprocess_retainedjob(
+		df=df_out,
+		option=opts.retainedjob_option,
+		source_col="RetainedJob",
+	)
+
+	# 7) ApprovalDate
+	df_out = approvalDate.preprocess_approvaldate(
+		df=df_out,
+		option=opts.approvaldate_option,
+		source_col="ApprovalDate",
+	)
+
+	# 8) ApprovalFY
+	df_out = approvalFY.preprocess_approvalfy(
+		df=df_out,
+		option=opts.approvalfy_option,
+		source_col="ApprovalFY",
+	)
+
+	# 9) FranchiseCode
+	df_out = franchise_code.preprocess_franchise_code(
+		df=df_out,
+		option=opts.franchise_option,
+		source_col="FranchiseCode",
+	)
+
+	# 10) UrbanRural
+	df_out = urban_rural.preprocess_urban_rural(
+		df=df_out,
+		option=opts.urbanrural_option,
+		source_col="UrbanRural",
+	)
+
+	# 11) RevLineCr
+	df_out = RevLineCr.preprocess_revlinecr(
+		df=df_out,
+		option=opts.revlinecr_option,
+		source_col="RevLineCr",
+	)
+
+	# 12) LowDoc
+	df_out = LowDoc.preprocess_lowdoc(
+		df=df_out,
+		option=opts.lowdoc_option,
+		source_col="LowDoc",
+	)
+
+	# 13) DisbursementDate
+	df_out = disbursementDate.preprocess_disbursementdate(
+		df=df_out,
+		source_col="DisbursementDate",
+	)
+
+	# 14) BalanceGross
+	df_out = balanceGross.preprocess_balancegross(
+		df=df_out,
+		option=opts.balancegross_option,
+		source_col="BalanceGross",
+	)
+
+	# 15) Accept
+	df_out = accept.preprocess_accept(
+		df=df_out,
+		option=opts.accept_option,
+		source_col="Accept",
+	)
+
+	# 16) DisbursementGross
+	df_out = disbursementGross.preprocess_disbursementgross(
+		df=df_out,
+		option=opts.disbursementgross_option,
+		source_col="DisbursementGross",
+	)
+
+	if is_tree_model:
+		df_out = add_tree_features(df_out, raw_dates=raw_dates, options=opts)
+
+	return df_out
+
+
+__all__ = ["OneStepOptions", "get_default_options", "preprocess_one_step", "add_tree_features"]
