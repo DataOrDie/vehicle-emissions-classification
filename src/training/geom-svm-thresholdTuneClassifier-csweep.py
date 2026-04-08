@@ -69,6 +69,7 @@ franchise_option: str = "binary" # only binary
 urbanrural_option: str = "onehot" # only onehot
 revlinecr_option: str = "C" # only C 
 lowdoc_option: str = "C" # only C
+citybank_option: str = "binary" # binary for linear/SVM models
 
 local_state: str = "IL"
 
@@ -84,6 +85,7 @@ local_state: str = "IL"
 # revlinecr_option: "A" | "B" | "C"
 # lowdoc_option: "A" | "B" | "C"
 # disbursementgross_option: "A" | "B" | "C"
+# citybank_option: "freq_bucket" | "binary" | "skip"
 
 options = OneStepOptions(
     noemp_option=noemp_option,
@@ -98,6 +100,7 @@ options = OneStepOptions(
     lowdoc_option=lowdoc_option,
     disbursementgross_option=disbursementgross_option,
     local_state=local_state,
+    citybank_option=citybank_option,
 )
 
 
@@ -261,6 +264,7 @@ run = wandb.init(
         "revlinecr_option": revlinecr_option,
         "lowdoc_option": lowdoc_option,
         "disbursementgross_option": disbursementgross_option,
+        "citybank_option": citybank_option,
         "local_state": local_state,
         "cv_n_splits": n_splits,
         "n_train_rows": int(X_trainval.shape[0]),

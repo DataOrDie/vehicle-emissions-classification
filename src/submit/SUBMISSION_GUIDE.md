@@ -172,4 +172,6 @@ kaggle competitions submissions house-prices-advanced-regression-techniques -v -
 
 COMMAND: 
 
+```
 kaggle competitions submit -c cdaw-loan-approval-prediction-in-illinois -f submissions/submission-geom-svm.csv -m "Geom-SVM model submission"
+```

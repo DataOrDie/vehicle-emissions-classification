@@ -1,89 +1,168 @@
-# Loan Approval Risk Classification
+# CDAW Loan Approval Prediction in Illinois
 
-## Repository Description
+This repository contains the team workflow, code, models, notebooks, and submissions for the CDAW loan approval challenge.
 
-This repository contains the work for an automatic learning competition where students apply the techniques learned in class to build the best-performing model.
+## Challenge summary
 
-The challenge provides a dataset of small and medium-sized enterprises (SMEs) that have applied for a loan. The objective is to train a classifier that predicts whether a loan should be approved or denied.
+The competition goal is to predict whether a loan application should be accepted or rejected for SME companies.
 
-Students assume the role of a bank representative and answer the core decision question:
+Core decision question:
+As a bank representative, should we grant a loan to company X, and why?
 
-**Should I grant a loan to a particular small business (Company X)? Why or why not?**
+The challenge setup (from professor notes + Kaggle brief):
 
-The decision is made by assessing the risk profile of each loan application through data preprocessing, feature engineering, model training, and evaluation.
+- Teams build and compare machine learning models for loan risk classification.
+- Each team must use at least:
+  - One geometric algorithm.
+  - One decision tree model.
+  - The team-assigned secret algorithm.
+- Kaggle is used for iterative submissions and leaderboard feedback.
+- Main competition metric is Macro F1.
+- Final ranking uses selected best submissions before deadline.
 
+## Course deliverables (from professor notes)
 
-RETO
+Moodle delivery includes:
 
+- Final notebook(s) and/or source code used to generate the final submission.
+- Team report in PDF:
+  - Common section (methodology, coordination, model-improvement techniques, problems and solutions).
+  - Strong focus on model optimization details, especially for the assigned secret algorithm.
+  - Individual section per team member with contributions and peer-evaluation table.
+  - Notebook authorship table mapping notebooks to members.
+- Packaged delivery (PDF presentation/report + memory + code) in ZIP format.
 
-Reto I de Aprendizaje Automático
-Requisitos de finalización
-Apertura: jueves, 12 de marzo de 2026, 09:00
-Cierre: jueves, 9 de abril de 2026, 23:59
+## Data and evaluation
 
-Actualmente, existe un gran número de competiciones en las que los mejores equipos de científicos de datos (data scientists) compiten para resolver problemas complejos utilizando técnicas de aprendizaje automático. En un gran número de casos, al equipo ganador se le recompensa con una gran suma de dinero.
+Dataset files:
 
-En este reto se va a realizar una competición de aprendizaje automático. La tarea consiste en emplear las técnicas aprendidas en clase, aplicándolas a una competición con el objetivo de obtener el mejor modelo. Para ello, se proporciona un conjunto de datos (dataset).
+- Training: [data/train.csv](data/train.csv)
+- Test (no labels): [data/test_nolabel.csv](data/test_nolabel.csv)
+- Submission template: [data/sample_submission.csv](data/sample_submission.csv)
 
-Su misión será:
+Evaluation notes:
 
-    Conocimiento del dominio. Analice el dataset proporcionado, entendiendo las variables del mismo, y su significado. Discuta en grupo sus intuiciones sobre qué variables pueden ser buenos predictores del riesgo asociado. Resuman sus conclusiones en el cuaderno (notebook) de Jupyter.
-    Análisis exploratorio. Analice el dataset para confirmar (o desestimar) sus hipótesis y discuta sus descubrimientos en el cuaderno.
-    Aprendizaje automático. Desarrolle uno o más modelos de aprendizaje automático. Debe probar al menos: un algoritmo geométrico, un árbol de decisión y el algoritmo secreto recibido por el grupo. Discuta los resultados y valídelos.
-    Concurso. Una vez disponga de un modelo, deberá usar la plataforma Kaggle para probar su modelo con datos, que combinan datos nuevos con los datos existentes. Puede realizar tantos intentos como desee. Razone los resultados en el cuaderno.
+- Kaggle evaluates on hidden labels / hidden split.
+- Preprocessing must be learned on training data and applied consistently to test data.
+- Macro F1 is the main selection metric, so class balance behavior matters.
 
-La estructura del ejercicio es la siguiente:
+## Current repository organization
 
-        Los alumnos formarán equipos de 6 personas. Los equipos no deben ser más pequeños (salvo el grupo con el resto de número de alumnos).
-        Cada equipo debe tener un capitán, que será el que se comunique con el profesorado, y el que realice la entrega del ejercicio.
-        El capitán de cada equipo debe enviar un correo comunicando los miembros su equipo.
-        Como respuesta, se recibirá un correo indicando el "algoritmo secreto" que se le ha asignado al equipo. Este algoritmo es un algoritmo de aprendizaje automático que obligatoriamente debe usar el equipo, aunque puede usar cualquier otro que desee.
-        La competición comienza el 13 de marzo. A partir de este momento se podrá realizar envíos a la plataforma Kaggle.
-        Como parte de la competición, es obligatorio para cada equipo emplear un algoritmo geométrico y un árbol de decisión. Por supuesto, el equipo debe usar además el "algoritmo secreto".
-        El día 8 de Abril, se cierra la competición en Kaggle.
-        Se debe entregar una memoria en formato PDF (límite el 9 de abril), en la que se debe explicar lo que se hecho en la competición, con especial énfasis en las técnicas empleadas para mejorar los modelos. Además, se debe explicar con mayor detalle la optimización de el "algoritmo secreto" que se le asignó al equipo. No se debe hacer una introducción al problema ni hablar de generalidades: la exposición debe tener un interés alto. Como entrega, se debe subir a Moodle:
+Top-level:
 
-    Notebook(s) o código con el que se ha generado la submission final
+- [README.md](README.md)
+- [requirements.txt](requirements.txt)
+- [Planning.md](Planning.md)
+- [about-data.md](about-data.md)
+- [feature-engineering.md](feature-engineering.md)
+- [Proffessor Notes and indications.md](Proffessor%20Notes%20and%20indications.md)
+- [data](data)
+- [src](src)
+- [notebooks](notebooks)
+- [models](models)
+- [submissions](submissions)
+- [experiments](experiments)
+- [wandb](wandb)
 
-    Se debe entregar una memoria breve en formato PDF explicando el trabajo de grupo en la competición. Debe contener estos puntos:
+Source code:
 
-    Parte común (3 - 6 páginas)
-        Descripción de la metodología seguida para coordinar el grupo
-        Problemas encontrados y soluciones. Se debe hacer especial énfasis en detallar las técnicas empleadas para mejorar los modelos, y explicar cómo se optimiza el 'algoritmo secreto' asignado. Se penalizará si se incluye una descripción al problema o generalidades de los algoritmos. Deben destacarse los aspectos relevantes.
-    Parte individual. Una sección de 1 cara de folio de extensión por cada miembro de grupo detallando su trabajo en el equipo, detallando retos y soluciones. Además, debe incluir una tabla con tantas filas como miembros del grupo, él mismo incluido, y dos columnas: Valoración (calificación asignada),  Repetir (con valor sí, si desea volver a trabajar con este miembro o no en caso contrario).
-    Código: una tabla tantas columnas como número de miembros del equipo más uno. La primera columna son los nombres de los notebooks entregados, y el resto de columnas son los miembros del equipo. Se debe poner una X en los autores de cada notebook.
+- Preprocessing modules: [src/preprocessing](src/preprocessing)
+  - Includes feature transforms and one-step pipeline pieces such as noemp, createjob, retainedjob, revlinecr, lowdoc, date and amount processing.
+- Training scripts: [src/training](src/training)
+  - Geometric family:
+    - [src/training/geom-svm.py](src/training/geom-svm.py)
+    - [src/training/geom-svm-kernel-rbf.py](src/training/geom-svm-kernel-rbf.py)
+    - [src/training/geom-svm-kernel-poly.py](src/training/geom-svm-kernel-poly.py)
+    - [src/training/geom-svm-kernel-sigmoid.py](src/training/geom-svm-kernel-sigmoid.py)
+    - [src/training/geom-svm-thresholdTuneClassifier.py](src/training/geom-svm-thresholdTuneClassifier.py)
+    - [src/training/geom-svm-thresholdTuneClassifier-csweep.py](src/training/geom-svm-thresholdTuneClassifier-csweep.py)
+  - Tree / bagging family:
+    - [src/training/bagging-extratrees.py](src/training/bagging-extratrees.py)
+    - [src/training/bagging-randomForest_MS.py](src/training/bagging-randomForest_MS.py)
+- Submission helpers: [src/submit](src/submit)
+  - [src/submit/kaggle.py](src/submit/kaggle.py)
+  - [src/submit/save_model.py](src/submit/save_model.py)
+  - [src/submit/SUBMISSION_GUIDE.md](src/submit/SUBMISSION_GUIDE.md)
 
+Experiment artifacts:
 
-En la entrega de Moodle, se debe subir el fichero de la presentación en PDF, la memoria de equipo y el código empleado en un archivo ZIP.
+- Saved model bundles under [models](models), grouped by model name.
+- CSV outputs under [submissions](submissions).
+- W&B run logs and artifacts under [wandb](wandb) and [src/training/wandb](src/training/wandb).
 
-El desarrollo del ejercicio será en Kaggle. Para poder participar, cada alumno debe tener cuenta en esta plataforma. Además, cada equipo deberá tener un nombre único que lo identifique dentro de la competición. Para conocer más detalles acerca de Kaggle, ver las FAQs.
+## Environment setup
 
-Hay que tener en cuenta que, para realizar un envío a la plataforma Kaggle, hay que generar un fichero CSV con las predicciones generadas, y subirlo. Los detalles del formato de este fichero se encuentran en la página del competición.
+1. Create / activate your Python environment (example: conda env sitc).
+2. Install dependencies:
 
-Enlace de acceso al reto: aquí.
+```bash
+pip install -r requirements.txt
+```
 
+## Training examples
 
-FROM KAGGLE: 
+Run from repository root.
 
-CDAW Loan Approval Prediction in Illinois
+Geometric SVM baseline:
 
-Introduction
+```bash
+conda run --no-capture-output -n sitc python -u ./src/training/geom-svm.py
+```
 
-This challenge consists of an automatic learning competition. The task is to apply the techniques learned in class to a competition to obtain the best model. To this end, a dataset of SME enterprises that have applied for a loan is provided, and their mission will be to build a classifier that determines whether the loan should be granted or denied.
+Threshold tuning + C sweep (recent workflow):
 
-In this challenge, the students must assume the role of a bank and formulate the following question: As a bank representative, should I grant a loan to a particular small business (Company X)? Why or why not? The student makes this decision by assessing a loan's risk.
-Evaluation
+```bash
+conda run --no-capture-output -n sitc python -u ./src/training/geom-svm-thresholdTuneClassifier-csweep.py
+```
 
-The evaluation metric for this competition is Macro F1-Score. The F1 score, commonly used in information retrieval, measures accuracy using the statistics precision p and recall r. Precision is the ratio of true positives (tp) to all predicted positives (tp + fp). Recall is the ratio of true positives to all actual positives (tp + fn). The F1 score is given by:
+Bagging ExtraTrees:
 
-F1 score definition
+```bash
+conda run --no-capture-output -n sitc python -u ./src/training/bagging-extratrees.py
+```
 
-The F1 metric weights recall and precision equally, and a good retrieval algorithm would maximize both precision and recall simultaneously. Thus, moderately good performance on both will be favored over excellent performance on one and poor performance on the other.
+## Generating Kaggle submissions
 
+After training, generate submission with the saved model artifacts:
 
-training and evaluation: 
-the whole dataset has been broken down into: 
+```bash
+python src/submit/kaggle.py <model_name>
+```
 
-training : use ./data/train.csv
-testing: use ./data/test_nolabel.csv
-challenge evaluation: not revealed, but we know it is a subset of the whole dataset, we need to provide preprocessing for it in kaggle. 
+For tree-specific feature path:
+
+```bash
+python src/submit/kaggle.py <model_name> --is-tree-model
+```
+
+Examples:
+
+```bash
+python src/submit/kaggle.py geom-svm
+python src/submit/kaggle.py bagging-extratrees --is-tree-model
+```
+
+Output file format:
+
+- Path: [submissions](submissions)
+- Naming: submission-<model_name>.csv
+- Columns: id, Accept
+
+## Kaggle competition reference
+
+Competition slug used in team notes and scripts:
+
+- cdaw-loan-approval-prediction-in-illinois
+
+CLI example:
+
+```bash
+kaggle competitions submit -c cdaw-loan-approval-prediction-in-illinois -f submissions/submission-geom-svm.csv -m "Geom-SVM model submission"
+```
+
+## Practical checklist
+
+- Keep preprocessing and feature ordering identical between train and test.
+- Validate with stratified folds and monitor Macro F1.
+- Save model + options + feature names before submission generation.
+- Track leaderboard changes and annotate what changed between submissions.

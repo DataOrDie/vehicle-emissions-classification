@@ -1,31 +1,30 @@
-# About the Data
+# About the Data - FOR BAGGING & RANDOM FOREST
 
-## Data Fields
+## Column Type Classification (Simplified for Bagging)
 
-| Field             | Type      | Description                                          |
-| ----------------- | --------- | ---------------------------------------------------- |
-| id                | Text      | Identifier of the data instance                      |
-| LoanNr_ChkDgt     | Text      | Identifier of the loan petition                      |
-| Name              | Text      | Borrower name                                        |
-| City              | Text      | Borrower city                                        |
-| State             | Text      | Borrower state                                       |
-| Bank              | Text      | Bank name                                            |
-| BankState         | Text      | Bank state                                           |
-| ApprovalDate      | Date/Time | Date SBA commitment issued                           |
-| ApprovalFY        | Text      | Fiscal year of commitment                            |
-| NoEmp             | Number    | Number of business employees                         |
-| NewExist          | Text      | 1 = Existing business, 2 = New business              |
-| CreateJob         | Number    | Number of jobs created                               |
-| RetainedJob       | Number    | Number of jobs retained                              |
-| FranchiseCode     | Text      | Franchise code; 00000 or 00001 = no franchise        |
-| UrbanRural        | Text      | 1 = Urban, 2 = Rural, 0 = Undefined                  |
-| RevLineCr         | Text      | Revolving line of credit; Y = Yes, N = No            |
-| LowDoc            | Text      | LowDoc loan program; Y = Yes, N = No                 |
-| ChgOffDate        | Date/Time | Date when a loan is declared in default              |
-| DisbursementDate  | Date/Time | Disbursement date                                    |
-| DisbursementGross | Currency  | Amount disbursed                                     |
-| BalanceGross      | Currency  | Gross amount outstanding                             |
-| Accept            | Text      | Loan approval status; 0 = Not approved, 1 = Approved |
+| Field             | Type                             | Category             | Bagging Notes                                                  |
+| ----------------- | -------------------------------- | -------------------- | -------------------------------------------------------------- |
+| id                | Text (identifier)                | Categorical_Nominal  | Drop from features; unique identifiers add no signal.          |
+| LoanNr_ChkDgt     | Text (identifier)                | Categorical_Nominal  | Use for dedup checks only; do not use as feature.              |
+| Name              | Text                             | Categorical_Nominal  | High cardinality; avoid direct use.                             |
+| City              | Text                             | Categorical_Nominal  | Frequency-bucket or group by region.                           |
+| State             | Text (2-letter code)             | Categorical_Nominal  | Good regional feature; treat as categorical.                   |
+| Bank              | Text                             | Categorical_Nominal  | High cardinality; use frequency bucketing (top-k + OTHER).     |
+| BankState         | Text (2-letter code)             | Categorical_Nominal  | Can differ from borrower state; useful for lender patterns.    |
+| ApprovalDate      | Date/Time                        | Categorical_Ordinal  | Extract year/month instead of raw date.                        |
+| ApprovalFY        | Year                             | Categorical_Ordinal  | Macro conditions and policy context.                           |
+| NoEmp             | Integer count                    | Numerical_Discrete   | Handle zeros carefully; consider banding or imputation flags.  |
+| NewExist          | Encoded category (1/2)           | Categorical_Ordinal  | Recode 0 as Unknown; strong predictor of business survival.    |
+| CreateJob         | Integer count                    | Numerical_Discrete   | Program impact; often zero; keep as-is or use with caution.    |
+| RetainedJob       | Integer count                    | Numerical_Discrete   | Program impact; often zero; combine with CreateJob if needed.  |
+| FranchiseCode     | Text/code                        | Categorical_Nominal  | Recode to Is_Franchise (binary); franchise = stability signal. |
+| UrbanRural        | Encoded category (0/1/2)         | Categorical_Ordinal  | Keep as discrete buckets; macro/geographic context.            |
+| RevLineCr         | Text flag                        | Categorical_Nominal  | Normalize to Y/N/UNKNOWN/MISSING; 24.3% non-standard values.  |
+| LowDoc            | Text flag                        | Categorical_Nominal  | Normalize to Y/N/UnknownOrMissing; policy & risk signal.       |
+| DisbursementDate  | Date/Time                        | Categorical_Ordinal  | Extract date components; check time-to-disbursement vs approval. |
+| DisbursementGross | Currency → Numeric               | Numerical_Continuous | Excellent quality (99.99%; 1 zero value). Strong risk signal. |
+| BalanceGross      | Currency → Numeric               | Numerical_Continuous | Often zero or sparse; keep as-is for signal.                   |
+| Accept            | Binary label (0/1)               | Categorical_Ordinal  | Target: 0 = not approved, 1 = approved.                        |
 
 ---
 
@@ -35,202 +34,239 @@ Based on the data dictionary and train sample, these are the most critical colum
 
 ### 1. Business Maturity (NewExist)
 
-Business age is one of the strongest predictors of survival. Startups (often coded as 2.0) have significantly higher failure rates than established businesses (1.0).
+Business age is one of the strongest predictors of survival. Startups (coded as 2) have significantly higher failure rates than established businesses (1).
 
-- Insight: New businesses often require stronger collateral or a stronger plan.
+### 2. Capacity and Scale (NoEmp & DisbursementGross)
 
-### 2. Capacity and Scale (NoEmp and DisbursementGross)
-
-Debt capacity matters. Debt capacity matters. If a company with 1 employee (NoEmp) asks for $500,000 (DisbursementGross), the risk is astronomical compared to a 50-employee firm asking for the same amount.
-
-- Insight: analyze the ratio of loan size to employee count as a proxy for the business's ability to generate the revenue needed for repayment.
+Debt capacity matters. A 1-employee firm borrowing $500K faces much higher risk than a 50-employee firm with the same loan. Analyze loan-to-employee ratio as proxy for repayment capacity.
 
 ### 3. Business Model Stability (FranchiseCode)
 
-Franchises have proven operating models. Independent firms are often riskier.
+Franchises have proven operating models; independent firms are riskier. Codes 00000/00001 = non-franchise; other codes indicate franchise relationship.
 
-- Insight: Codes like 00000 or 00001 usually mean non-franchise. Specific franchise codes may indicate lower operational uncertainty.
+### 4. Economic Impact (CreateJob & RetainedJob)
 
-### 4. Economic Impact (CreateJob and RetainedJob)
+In SBA lending, jobs created/retained matter beyond pure credit risk. Loans creating jobs are more attractive under government-guaranteed programs, even at similar risk.
 
-In SBA-like lending, impact can matter in addition to pure credit risk. the bank isn't just looking at profit—they're looking at the mission.
+### 5. Loan Type & Process (RevLineCr & LowDoc)
 
-- Insight: A loan that creates 10 jobs is more "attractive" to approve under certain government-guaranteed programs than one that creates zero, even if the risk profile is similar.
+- **RevLineCr**: Revolving lines signal cash-flow struggles if heavily used.
+- **LowDoc**: Lower-documentation loans imply different risk and policy behavior, often smaller amounts with different eligibility rules.
 
-### 5. Loan Type and Process Complexity (RevLineCr and LowDoc)
+### 6. Macro Conditions (ApprovalFY & UrbanRural)
 
-- RevLineCr: (Revolving Line of Credit) These are like credit cards for businesses. High usage can signal cash-flow struggles..
-- LowDoc: Lower-documentation processing can imply different risk and policy behavior.If a loan is "LowDoc" (Y) often means the loan is smaller but might have higher interest or specific eligibility rules.
-
-### 6. Macro Conditions (ApprovalFY and UrbanRural)
-
-A loan approved in 2006 (ApprovalFY) just before the 2008 crash has a very different context than one approved in 1996. Similarly, economic conditions in Urban vs. Rural areas (coded in UrbanRural) affect a business's customer base.
-
-## Modeling Notes
-
-### Current Modeling Direction
-
-- We are switching from geometric/SVM-style modeling to tree-based ensembles (bagging and ExtraTrees).
-- Prioritize split-friendly, leakage-safe features over geometric normalization tricks.
-- Keep preprocessing simple and robust: trees benefit more from clean buckets than from aggressive scaling.
-
-### Target
-
-- Accept is the binary target label (0 or 1).
-- class 1 appears more frequent than class 0, so verify class imbalance on the full dataset.
-
-### Identifier and Leakage-Prone Fields
-
-- id: unique row identifier; do not use as predictive signal.
-- LoanNr_ChkDgt: loan identifier; mostly useful for dedup checks.
-
-### Borrower Profile Fields
-
-- Name, City, State
-- NoEmp
-- NewExist
-- FranchiseCode
-- UrbanRural
-
-These include non-standard values in some cases, so category cleaning is required.
-
-### Loan and Process Fields
-
-- Bank, BankState
-- ApprovalDate, ApprovalFY
-- DisbursementDate
-- DisbursementGross
-- BalanceGross
-
-These include non-standard values in some cases, so category cleaning is required.
-
-### Program and Policy Flags
-
-- RevLineCr
-- LowDoc
-
-These include non-standard values in some cases, so category cleaning is required.
-
-### Strongest Likely Risk Signals
-
-- Business size and maturity (NoEmp, NewExist)
-- Requested amount (DisbursementGross)
-- Lender and program characteristics (Bank, RevLineCr, LowDoc)
-- Geography and time (City/State, ApprovalFY)
-
-### Essential Preprocessing
-
-- Parse currency fields to numeric.
-- Parse dates into features (year, month, age).
-- Normalize categorical text (case, typos).
-- Handle unusual categorical values and missing data.
-- Drop pure identifiers.
-- Avoid target encoding unless done strictly out-of-fold.
-- Standardization is optional for trees and not required for ExtraTrees/Bagging.
-
-### Tree-First Feature Engineering Defaults (Bagging/ExtraTrees)
-
-- Keep numeric signals in natural units after cleaning (NoEmp, CreateJob, RetainedJob, DisbursementGross, BalanceGross).
-- Add robust ratio/interaction features that trees can split on naturally:
-  - loan_per_employee = DisbursementGross / max(NoEmp, 1)
-  - jobs_total = CreateJob + RetainedJob
-  - bank_borrower_same_state = 1(State == BankState)
-- Convert dates to components and elapsed features:
-  - approval_year, approval_month
-  - disbursement_year, disbursement_month
-  - days_approval_to_disbursement (clip negative/outlier values)
-- For high-cardinality categoricals (Bank, City, Name), prefer frequency bucketing (top-k + OTHER) over very wide one-hot expansions.
-- Keep UNKNOWN/MISSING buckets explicit for policy flags (RevLineCr, LowDoc).
-
-### Validation Rules for Tree Models
-
-- Fit all cleaning, imputing, bucketing, and encoding inside each CV fold.
-- Use stratified CV and track macro F1 as the primary model-selection metric.
-- Compare against a minimal baseline (raw cleaned features only) before adding engineered features.
-- Prefer the simplest stable feature set with low fold-to-fold variance.
+Macro context affects approval patterns: a 2006 loan (pre-2008 crash) differs from 1996. Urban vs Rural areas have different customer bases and economic conditions.
 
 ---
 
-## Data Dictionary (Simplified)
+## Modeling Notes for Tree-Based Ensembles
 
-| Field             | Type      | Simple Description                                      | Common Values / Notes                                          |
-| ----------------- | --------- | ------------------------------------------------------- | -------------------------------------------------------------- |
-| id                | Text      | Unique identifier for each row in the dataset.          | Usually used only to identify records, not as a model feature. |
-| LoanNr_ChkDgt     | Text      | Unique loan application identifier.                     | Useful for tracking or deduplication checks.                   |
-| Name              | Text      | Name of the business owner or borrower.                 | High-cardinality text; often not ideal for direct modeling.    |
-| City              | Text      | Borrower's city.                                        | Location feature.                                              |
-| State             | Text      | Borrower's state.                                       | Two-letter state code in many cases.                           |
-| Bank              | Text      | Name of the bank that handled the loan.                 | Can capture lender-specific behavior.                          |
-| BankState         | Text      | State where the bank is located.                        | May differ from borrower state.                                |
-| ApprovalDate      | Date/Time | Date when the SBA commitment was approved.              | Can be converted into year/month/quarter features.             |
-| ApprovalFY        | Text      | Fiscal year when the loan was approved.                 | Time and macroeconomic context feature.                        |
-| NoEmp             | Number    | Number of employees in the business.                    | Proxy for business size.                                       |
-| NewExist          | Text      | Whether the business is new or existing.                | `1 = Existing business`, `2 = New business`.                   |
-| CreateJob         | Number    | Number of jobs expected to be created by the loan.      | Program impact indicator.                                      |
-| RetainedJob       | Number    | Number of jobs expected to be retained.                 | Program impact indicator.                                      |
-| FranchiseCode     | Text      | Code indicating franchise relationship.                 | `00000` or `00001` often means no franchise.                   |
-| UrbanRural        | Text      | Area type where the business operates.                  | `1 = Urban`, `2 = Rural`, `0 = Undefined`.                     |
-| RevLineCr         | Text      | Indicates if this loan is a revolving line of credit.   | `Y = Yes`, `N = No` (may include non-standard values).         |
-| LowDoc            | Text      | Indicates if this is a low-documentation loan.          | `Y = Yes`, `N = No` (may include non-standard values).         |
-| ChgOffDate        | Date/Time | Date the loan was charged off (default/write-off date). | Missing values can mean no charge-off occurred.                |
-| DisbursementDate  | Date/Time | Date when funds were disbursed to the borrower.         | Useful for time-based features.                                |
-| DisbursementGross | Currency  | Total loan amount disbursed.                            | Convert currency strings to numeric values before modeling.    |
-| BalanceGross      | Currency  | Remaining gross balance outstanding.                    | Often zero in some subsets; still useful to inspect.           |
-| Accept            | Text      | Target label: whether the loan was approved.            | `0 = Not approved`, `1 = Approved`.                            |
+### Current Direction
 
-## Column-Specific Recommendations
+We are using tree-based ensembles (Bagging & Random Forests) for this problem. Prioritize:
+- Split-friendly, leakage-safe features
+- Simple, robust preprocessing (trees benefit from clean buckets, not aggressive scaling)
+- Clean categorical normalization over complex transformations
 
-## NewExist column
+### Target
 
-- Recode NewExist == 0.0 to missing (NaN), since docs define only 1 and 2.
-- Create explicit "Unknown" category for missing values.
-- Use compact categorical encoding for NewExist (Existing, New, Unknown) suitable for tree models.
-- Validate with cross-validation against a simpler baseline (drop those 13 rows) and keep whichever performs better.
+- **Accept**: Binary target (0 = not approved, 1 = approved)
+- Verify class imbalance on full dataset before modeling
 
-Practical choice:
+### Identifier & Leakage-Prone Fields
 
-- More robust: keep rows and add Unknown category.
+- **id**: Unique row identifier; drop entirely
+- **LoanNr_ChkDgt**: Loan identifier; useful for dedup only, not a feature
+- **ChgOffDate**: Post-outcome information; likely leakage risk for approval prediction
 
-## NoEmp column.
+### Field Grouping for Trees
 
-For NoEmp = 0, choose based on whether 0 is invalid or meaningful. depends on whether 0 means bad data or a real business state.
+**Borrower Profile Fields:**
+- Name, City, State, NoEmp, NewExist, FranchiseCode, UrbanRural
+- Requires category cleaning; handle non-standard values carefully
 
-Option A: Treat 0 as invalid and drop those rows
+**Loan & Process Fields:**
+- Bank, BankState, ApprovalDate, ApprovalFY, DisbursementDate, DisbursementGross, BalanceGross
+- Requires currency parsing and date extraction; clean non-standard values
 
-- Use when 0 is clearly noise.
-- Pro: cleaner signal.
-- Con: you lose data (in your case only about 1.02%, so loss is small).
+**Program & Policy Flags:**
+- RevLineCr, LowDoc
+- Requires normalization and explicit UNKNOWN/MISSING buckets
 
-Option B: Treat 0 as missing and impute
+### Strongest Risk Signals
 
-- Replace 0 with NaN, impute (median/KNN/model-based), add NoEmp_was_zero flag.
-- Pro: keeps rows and preserves suspicious-value signal.
-- Con: imputation can blur patterns, blur true risk patterns
+Priority ranking for trees:
+1. Business size and maturity (NoEmp, NewExist)
+2. Requested amount (DisbursementGross)
+3. Lender and program characteristics (Bank, RevLineCr, LowDoc)
+4. Geography and time context (State/City, ApprovalFY)
 
-Option C: Keep 0 as meaningful state.
+### Essential Preprocessing for Trees
 
-- Keep 0 If 0 could represent pre-operational firms/unknown staffing, keep it.
-- Add explicit NoEmp = 0 bucket.
-- Pro: model can learn if this group has different risk.
-- Con: only works if 0 is truly meaningful.
+- Parse currency fields to numeric (DisbursementGross, BalanceGross)
+- Parse dates into components: year, month, quarter
+- Normalize categorical text (case, typos, encoding)
+- Explicit UNKNOWN/MISSING buckets for policy flags
+- Drop pure identifiers (id, LoanNr_ChkDgt)
+- Avoid standardization; trees work on natural units
+- Avoid target encoding unless strictly out-of-fold (use in CV only)
 
-Option D: Use Robust feature engineering:
+### Feature Engineering Defaults (Bagging/Random Forest)
 
-- For skewed NoEmp, Use log1p(NoEmp) and/or bands (0, 1, 2-5, 6-10, 11-50, >50).
-- For ratios like loan_per_employee, avoid division instability:
-  - loan_per_employee = loan_amount / max(NoEmp, 1)
-  - or set ratio missing when NoEmp = 0 and add NoEmp_is_zero flag.
+Keep numeric signals in natural units after cleaning. Add robust interaction features trees can split naturally:
+- `loan_per_employee` = DisbursementGross / max(NoEmp, 1)
+- `jobs_total` = CreateJob + RetainedJob
+- `bank_borrower_same_state` = 1 if State == BankState else 0
+- `approval_year`, `approval_month` (from ApprovalDate)
+- `disbursement_year`, `disbursement_month` (from DisbursementDate)
+- `days_approval_to_disbursement` (with outlier clipping)
 
-### Model-family guidance:
+For high-cardinality categoricals (Bank, City), prefer frequency bucketing (top-k + OTHER) over wide one-hot encoding.
 
-- Tree models (Bagging/ExtraTrees, XGBoost/LightGBM/CatBoost): indicator + raw or banded feature often works well.
+### Validation Rules for Bagging
 
+- Fit all cleaning, imputing, bucketing, encoding inside each CV fold (no leakage)
+- Use stratified CV; track macro F1 as primary metric
+- Compare engineered feature set against minimal baseline (raw cleaned features)
+- Prefer simplest stable feature set with low fold-to-fold variance
+- If comparing multiple preprocessing strategies, choose by CV stability (mean + variance across folds), not single best fold
 
-Suggested workflow:
+---
 
-1. Pipeline A: drop NoEmp = 0
-2. Pipeline B: 0 to NaN + impute + NoEmp_is_zero column
-3. Pipeline C: keep 0 + NoEmp_is_zero + NoEmp bands
+## Column Details (Bagging-Specific Guidance)
+
+### NewExist
+
+**Preprocessing:**
+- Recode NewExist == 0.0 to Missing (NaN); docs define only 1 and 2
+- Create explicit Unknown category
+- Final categories for trees: Existing (1), New (2), Unknown
+
+**Bagging advantage:** Trees naturally handle ordinal structure (new = higher risk)
+
+### NoEmp
+
+**Preprocessing options:**
+1. **Option A (Aggressive)**: Drop NoEmp = 0 (lose ~1% data for cleaner signal)
+2. **Option B (Balanced)**: Replace 0 → NaN, impute median, add NoEmp_is_zero flag
+3. **Option C (Preserve)**: Keep 0 as meaningful bucket if pre-operational/unknown staffing is valid
+
+**Feature engineering:**
+- For skewed distribution: add NoEmp_band (0, 1, 2-5, 6-10, 11-50, >50)
+- loan_per_employee = DisbursementGross / max(NoEmp, 1)
+- Add NoEmp_is_zero flag when using Option B/C
+
+**Bagging recommendation:** Start with Option B (impute + flag); compare against A/C via CV
+
+**Strong baseline:** NoEmp_is_zero flag + NoEmp_clean (imputed) + NoEmp_band
+
+### FranchiseCode
+
+**Preprocessing:**
+- Values: 00000 or 00001 = non-franchise; others = franchise codes
+- Recode to binary: `Is_Franchise` (0 = non-franchise, 1 = franchise)
+- Or keep detailed franchise codes if cardinality is manageable
+
+**Bagging insight:** Franchises = proven models = lower risk; trees can exploit this split naturally
+
+### UrbanRural
+
+**Preprocessing:**
+- Keep discrete buckets: 0 = Undefined, 1 = Urban, 2 = Rural
+- Treat as categorical (ordered but small cardinality)
+- No imputation needed if no missing values
+
+**Bagging insight:** Urban/Rural = macro/geographic context; trees can learn separate risk profiles
+
+### RevLineCr
+
+**Data quality issue:** 24.3% non-standard values (0, T, Q, blanks); cannot ignore
+
+**Preprocessing:**
+- Create RevLineCr_clean with buckets: Y, N, UNKNOWN (for 0/T/Q), MISSING
+- Add flags: RevLineCr_is_nonstandard, RevLineCr_is_missing
+- Avoid arbitrary ordinal encoding
+
+**Sensitivity testing:** Try Policy A (0→UNKNOWN), Policy B (0→N, T/Q→UNKNOWN), Policy C (keep 0 separate)
+- Choose most stable across CV folds (mean + variance), not single best fold
+
+**Bagging recommendation:** Start with Policy A; ablate to Policy B if stable improvement observed
+
+**Default starting point:**
+- RevLineCr_clean: Y/N/UNKNOWN/MISSING
+- Include nonstandard and missing flags
+- Trees naturally handle categorical buckets
+
+### LowDoc
+
+**Data quality issue:** ~0.42% non-standard values (0, S, C, A, R, blanks); small but keep to avoid bias
+
+**Preprocessing:**
+- Option A: LowDoc_clean with Y, N, UNKNOWN, MISSING buckets
+- Option B (Compact): LowDoc_clean with Y, N, UnknownOrMissing (merge rare buckets)
+- Add flag: LowDoc_was_nonstandard_or_missing
+
+**Bagging recommendation:** Use Option B (compact) for simplicity; avoid removing rows
+
+**Encoding:** Categorical buckets passed to tree models directly
+
+### DisbursementGross
+
+**Data quality:** Excellent (99.99% valid); 1 zero-value outlier (row 11414, IL)
+
+**Preprocessing options:**
+- Keep as-is (let model learn zero = special case)
+- Investigate row 11414 for actual approval status
+- Consider zero as potential data error if needed
+
+**Features:**
+- Use in ratio features (loan_per_employee)
+- May add log-transformed version for nonlinearity: log1p(DisbursementGross)
+
+**Bagging insight:** Strong risk signal; raw values work well for trees
+
+### ApprovalDate & ApprovalFY
+
+**Preprocessing:**
+- Extract year, month from ApprovalDate (not raw date)
+- ApprovalFY already provides fiscal year context
+- Create date components inside CV pipeline to avoid leakage
+
+**Bagging note:** Macro conditions (pre-2008 vs post-2008) affect approval patterns; trees can split on these
+
+### CreateJob & RetainedJob
+
+**Bagging insight:** Program impact features; often zero
+- Keep as-is or combine: jobs_total = CreateJob + RetainedJob
+- Investigate correlation with approval before use
+
+### Bank & BankState
+
+**Preprocessing:**
+- Clean non-standard bank names (case, typos)
+- For high-cardinality Bank: use frequency bucketing (top-k + OTHER)
+- BankState can be used as-is (state codes)
+- Optional feature: bank_borrower_same_state (1 if Bank state == Borrower state)
+
+**Bagging insight:** Lender behavior varies; trees can split on lender identity after bucketing
+
+---
+
+## Data Quality Checks & Open Questions
+
+**DisbursementGross zero value (row 11414):**
+- Investigate if loan was actually approved despite $0 disbursement
+- If data error: drop or mark as suspicious
+- If legitimate (pre-approved but not yet drawn): keep and let model decide
+
+**Empty Bank / BankState values:**
+- Count approved vs not approved in these rows
+- Decide: drop rows or impute with UNKNOWN category
+
+**RevLineCr & LowDoc distribution:**
+- Verify policy A/B/C stability via CV before final decision
+- Non-standard buckets often capture "data quality signal"
+
    Compare AUC/F1/PR-AUC and calibration; choose simplest stable winner.
 
 Strong default baseline:
@@ -247,9 +283,7 @@ Option A: Define a canonical mapping policy
 
 - Keep Y and N as valid.
 - Map 0, S, C, A, R, and blanks to Unknown.
-- Keep true missing as Missing (or merge with Unknown if you prefer one bucket).
 
-Option B: Use a robust encoded feature set
 
 - Create LowDoc_clean with categories: Y, N, Unknown, Missing.
 - Add LowDoc_is_nonstandard as a binary flag (1 if original value in 0/S/C/A/R).

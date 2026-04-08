@@ -76,7 +76,7 @@ def add_tree_features(
 	engineered = df_frame.copy()
 	opts = options or OneStepOptions()
 
-	# Add high-frequency buckets for high-cardinality categorical columns.
+	# Tree models only use the high-frequency bucketed version.
 	if {"City", "Bank"}.issubset(engineered.columns):
 		citybank_option = str(opts.citybank_option).upper()
 		if citybank_option == "FREQ_BUCKET":
@@ -90,11 +90,7 @@ def add_tree_features(
 				suffix=opts.citybank_suffix,
 				drop_original=opts.citybank_drop_original,
 			)
-		elif citybank_option == "BINARY":
-			engineered = city_bank.get_city_bank_encoder(engineered)
-		elif citybank_option == "SKIP":
-			pass
-		else:
+		elif citybank_option not in {"BINARY", "SKIP"}:
 			raise ValueError("citybank_option must be 'freq_bucket', 'binary', or 'skip'")
 
 	if {"NoEmp", "DisbursementGross"}.issubset(engineered.columns):
@@ -236,8 +232,12 @@ def preprocess_one_step(
 	# 2) NoEmp
 	df_out = noemp.preprocess_noemp(df_out, option=opts.noemp_option, source_col="NoEmp")
 
-	# # 3) City/Bank binary encoding
-	# df_out = city_bank.get_city_bank_encoder(df_out)
+	# 3) City/Bank encoding
+	citybank_option = str(opts.citybank_option).upper()
+	if citybank_option == "BINARY":
+		df_out = city_bank.get_city_bank_encoder(df_out)
+	elif citybank_option not in {"FREQ_BUCKET", "SKIP"}:
+		raise ValueError("citybank_option must be 'freq_bucket', 'binary', or 'skip'")
 
 	# 4) NewExist
 	df_out = newExists.preprocess_newexist(
